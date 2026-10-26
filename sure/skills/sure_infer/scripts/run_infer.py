@@ -34,6 +34,8 @@ from container_execution import build_local_container_command, container_path, e
 from dataset_identity import projection_stems
 from deployment_binding import DEPLOYMENT_BINDING_V1, DEPLOYMENT_BINDING_V2
 from python_execution import build_local_python_command, verify_model_integrity
+from sure.site.gpu_partition import partition_environment
+from sure.runtime.gpu_partition import GPU_CONTEXT
 
 ENTRYPOINT = Path(__file__).resolve().with_name("infer_entrypoint.py")
 STAGE_MARKER_RE = re.compile(r"^INFER_STAGE_FAILED (\S+)\s*$", re.MULTILINE)
@@ -479,6 +481,11 @@ def main() -> int:
         device_actual = "cuda"
         device_env.update({"DEVICE": "cuda", "SURE_EVAL_DEVICE_ACTUAL": "cuda"})
 
+    device_env = partition_environment(device_env, "infer", device=device_request, workers=workers)
+    if GPU_CONTEXT in device_env:
+        device_actual = device_env["SURE_EVAL_DEVICE_ACTUAL"]
+        cuda_visible = device_env["CUDA_VISIBLE_DEVICES"]
+
     surface = _build_surface(
         eval_input=eval_input,
         binding=binding,
@@ -495,6 +502,8 @@ def main() -> int:
         read_files=[eval_input_path, decision_path],
     )
     surface_path = artifacts_dir / "execution_surface.json"
+    if GPU_CONTEXT in device_env:
+        surface["env"][GPU_CONTEXT] = device_env[GPU_CONTEXT]
     if workers > 1:
         surface["env"]["NO_RESUME"] = "1"
     if args.resume_predictions:

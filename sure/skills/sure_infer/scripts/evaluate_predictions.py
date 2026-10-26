@@ -26,6 +26,9 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+from sure.site.gpu_partition import partition_environment
+
 from sure_eval.core.config import Config
 from sure_eval.core.logging import configure_logging, get_logger
 from sure_eval.datasets import DatasetManager
@@ -510,6 +513,7 @@ def _describe_external_pipeline(
     request_path = Path(request_handle.name)
     env = _external_env(engine_root)
     env["SURE_EVAL_BRIDGE_REQUEST"] = str(request_path)
+    env = partition_environment(env, "eval", device="cpu")
     code = r"""
 import json
 import os
@@ -656,6 +660,7 @@ def _run_external_pipeline(
 
     env = _external_env(engine_root)
     env["SURE_EVAL_BRIDGE_REQUEST"] = str(request_path)
+    env = partition_environment(env, "eval", device=str(request.get("device") or "cpu"))
     if str(request.get("device") or "").lower() == "cpu" and "CUDA_VISIBLE_DEVICES" not in env:
         env["CUDA_VISIBLE_DEVICES"] = ""
 

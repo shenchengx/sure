@@ -32,6 +32,7 @@ sys.path.append(str(ONBOARD_SCRIPTS))
 from deployment_binding import DeploymentBindingError, load_deployment_binding
 from deployment_contract import declared_server_protocol
 from model_child_env import model_child_env
+from sure.site.gpu_partition import partition_command, partition_environment
 from model_wrapper_mcp_server import _tool_names
 from server_protocol import MCP_SERVER_PROTOCOL
 from sure.runtime import bundle_content
@@ -788,7 +789,7 @@ def _advertised_contract(candidate: Path, command: list[str], tool_name: str, in
                 "--timeout", f"{timeout:.0f}",
                 "--produces", str(produces),
             ],
-            capture_output=True, text=True, timeout=timeout + 60.0, check=False, env=model_child_env(),
+            capture_output=True, text=True, timeout=timeout + 60.0, check=False, env=partition_environment(model_child_env(), "approve"),
         )
         evidence = read_json(produces) if produces.is_file() else {}
     if completed.returncode != 0:
@@ -925,7 +926,7 @@ def verify_runtime(run_dir: Path) -> dict[str, Any]:
         # on every run, so smoking the sealed candidate in place would dirty the tree the
         # digest check below protects. Run the smoke on a throwaway mirror instead. The
         # mirror lives beside the candidate so its hard links can land on one filesystem.
-        child_env = model_child_env(os.environ)
+        child_env = partition_environment(model_child_env(os.environ), "approve")
         with tempfile.TemporaryDirectory(prefix="sure-approve-smoke-", dir=candidate.parent) as smoke_root:
             smoke_candidate = Path(smoke_root) / candidate.name
             _mirror_candidate_for_smoke(candidate, smoke_candidate)
@@ -970,7 +971,8 @@ def verify_runtime(run_dir: Path) -> dict[str, Any]:
         if container.get("gpu_required") is True:
             command.extend(["--gpus", "all"])
         command.extend([image_ref, str(container["python_executable"]), f"{model_target}/validate.py"])
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=1800, check=False)
+        command, child_env = partition_command(command, os.environ, "approve", device="auto" if container.get("gpu_required") is True else "cpu")
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=1800, check=False, env=child_env)
         smoke = {"command": command, "pull_stdout_sha256": sha256_bytes(pull.stdout.encode()), "exit_code": completed.returncode, "stdout_sha256": sha256_bytes(completed.stdout.encode()), "stderr": completed.stderr[-2000:]}
     if completed.returncode != 0:
         raise ApprovalError(f"candidate runtime verification failed: {smoke['stderr']}")

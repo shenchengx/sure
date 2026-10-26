@@ -29,6 +29,7 @@ export interface SitePolicy {
 	execution: {
 		surfaces: ExecutionSurface[];
 		local_runtimes: LocalRuntime[];
+		gpu_partition?: { onboard_gpu_uuid: string };
 		vc_project?: string;
 		vc_partitions?: string[];
 		vc_default_partition?: string;
@@ -183,7 +184,7 @@ export function validateSitePolicy(value: unknown): SitePolicy {
 	const execution = expectRecord(root.execution, "execution");
 	rejectUnknown(
 		execution,
-		["surfaces", "local_runtimes", "vc_project", "vc_partitions", "vc_default_partition"],
+		["surfaces", "local_runtimes", "gpu_partition", "vc_project", "vc_partitions", "vc_default_partition"],
 		"execution",
 	);
 	const surfaces = expectUniqueStrings(execution.surfaces, "execution.surfaces", false);
@@ -238,6 +239,15 @@ export function validateSitePolicy(value: unknown): SitePolicy {
 			local_runtimes: localRuntimes as LocalRuntime[],
 		},
 	};
+	if (execution.gpu_partition !== undefined) {
+		const partition = expectRecord(execution.gpu_partition, "execution.gpu_partition");
+		rejectUnknown(partition, ["onboard_gpu_uuid"], "execution.gpu_partition");
+		const uuid = expectString(partition.onboard_gpu_uuid, "execution.gpu_partition.onboard_gpu_uuid");
+		if (!/^GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uuid)) {
+			throw new Error("execution.gpu_partition.onboard_gpu_uuid must be a full lowercase GPU UUID");
+		}
+		policy.execution.gpu_partition = { onboard_gpu_uuid: uuid };
+	}
 	if (datasets.projection_root !== undefined) {
 		policy.datasets.projection_root = expectAbsolutePath(datasets.projection_root, "datasets.projection_root");
 	}

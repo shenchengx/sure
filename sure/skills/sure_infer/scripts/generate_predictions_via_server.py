@@ -44,6 +44,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "runtime" / "harness"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from model_child_env import model_child_env
+from sure.runtime.gpu_partition import enforce_gpu_context
 from model_identity import canonical_model_name
 
 from sure_eval.core.config import Config
@@ -1330,6 +1331,7 @@ def main() -> int:
         env["CUDA_VISIBLE_DEVICES"] = os.environ["CUDA_VISIBLE_DEVICES"]
         env["DEVICE"] = "cuda:0"
         env["SURE_EVAL_DEVICE_ACTUAL"] = "cuda:0"
+    env = enforce_gpu_context(env, device="cpu" if str(args.device).lower() == "cpu" else None)
     protocol_id = args.protocol
     protocol_resolution = _resolve_protocol_parameters(protocol_id, model_dir, env)
 

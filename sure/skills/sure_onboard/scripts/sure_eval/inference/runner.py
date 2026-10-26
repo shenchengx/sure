@@ -14,6 +14,9 @@ from typing import Any
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[6]))
+from sure.runtime.gpu_partition import GPU_CONTEXT, read_context
+from sure.site.gpu_partition import partition_environment
 from sure_eval.inference.adapters import create_predict_adapter
 from sure_eval.inference.errors import AdapterError, InferenceSurfaceError, SchemaValidationError
 from sure_eval.inference.language import map_language_for_model
@@ -476,6 +479,10 @@ def _run_asr_subprocess(
     model_path_value = model_info.env.get("MODEL_PATH") or model_info.model_id or None
     child_env = env.copy()
     child_env["DEVICE"] = device
+    context = read_context(os.environ)
+    child_env = partition_environment(child_env, context["stage"] if context else "infer", device=device)
+    if GPU_CONTEXT in child_env:
+        device = child_env["DEVICE"]
     # Inject protocol parameters (backward-compatible: no-op if None)
     if protocol_params:
         for key, value in protocol_params.items():

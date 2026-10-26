@@ -134,6 +134,17 @@ The draft must use backend=`uv`, point to an executable validation Python, and n
 
 ### Device Policy
 
+When the active site policy contains `execution.gpu_partition.onboard_gpu_uuid`, local onboard GPU execution is restricted to that full UUID; infer, trans, approve, agent evaluation and metric evaluation exclude it. Model code uses process-local `cuda:0` after visibility is applied. A missing/excluded UUID fails the GPU launch instead of selecting another card. Explicit CPU execution hides GPUs.
+
+The standard probe and validation gates apply this policy automatically. For ad-hoc model import/load evidence in `build_env` or `validate_env_compat`, and GPU container validation in `package_container`, launch through the Harness Python helper (argv after `--`, no shell string):
+
+```bash
+"$HARNESS_PYTHON_BIN" scripts/run_gpu_command.py --cwd <model_dir> -- <absolute-model-python> <probe-script>
+"$HARNESS_PYTHON_BIN" scripts/run_gpu_command.py -- docker run --rm --gpus all <image> <validation-command>
+```
+
+The helper converts Docker GPU requests to the permitted UUID set and prints the applied context to stderr. Device-related environment values from model configuration cannot widen that set. Do not use privileged containers, device mounts, or direct GPU commands to bypass this boundary. This policy separates stages; it does not queue simultaneous onboard jobs or reserve resources against unrelated processes.
+
 Default device policy is **CUDA-first** for local deployment:
 
 1. `device=auto` means: if host CUDA is visible (`nvidia-smi -L` succeeds or equivalent runtime evidence exists), `validate_env_compat` must first select `device="cuda"` and prove weights load on CUDA.

@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sure_infer" / "scripts"))
 from deployment_contract import declared_server_protocol
 from model_child_env import model_child_env
+from sure.site.gpu_partition import partition_command, partition_environment
 from server_protocol import JSONL_SERVER_PROTOCOL
 from sure.runtime.evaluation.task_registry import normalize_task
 from sure.runtime.model_server.tool_contract import tool_contracts
@@ -116,7 +117,7 @@ def env_for(data: dict, validation_device: str | None = None) -> dict[str, str]:
                 env[key] = str(value)
     # Artifact-declared variables may include model import paths, but they must
     # not be able to reintroduce Harness interpreter state after sanitization.
-    return model_child_env(env)
+    return partition_environment(model_child_env(env), "onboard", device=validation_device or "auto")
 
 
 def maybe_use_model_local_python(command: list[str] | str, *, shell: bool, cwd: Path) -> list[str] | str:
@@ -345,12 +346,13 @@ def run_validation_command(
 
     timeout_raw = data.get("timeout_seconds")
     timeout = float(timeout_raw) if isinstance(timeout_raw, (int, float)) and timeout_raw > 0 else 1800.0
+    command, child_env = partition_command(command, env_for(data, validation_device), "onboard", device=validation_device or "auto")
     started = time.time()
     try:
         proc = subprocess.run(
             command,
             cwd=str(cwd),
-            env=env_for(data, validation_device),
+            env=child_env,
             capture_output=True,
             text=True,
             shell=shell,

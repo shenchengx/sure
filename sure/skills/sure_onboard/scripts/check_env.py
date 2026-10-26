@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "runtime" / "harness"))
 from model_child_env import model_child_env
+from sure.site.gpu_partition import partition_environment
 from sure.runtime.model.bootstrap import ModelRuntimeError, manifest_sha256, verify_runtime
 from sure.runtime.uvenv import runtime_python_relative
 from sure.site.loader import SitePolicyError, load_site_policy
@@ -221,6 +222,7 @@ def run_runtime_probe(
     cwd: Path,
     imports: list[str],
     require_cuda: bool,
+    device: str = "auto",
 ) -> tuple[bool, str]:
     script = r"""
 import importlib
@@ -269,6 +271,7 @@ sys.exit(0 if ok else 31)
 """
     env = model_child_env()
     env["PYTHONPATH"] = str(cwd)
+    env = partition_environment(env, "onboard", device=device)
     try:
         proc = subprocess.run(
             [str(python_executable), "-c", script, json.dumps(imports), "1" if require_cuda else "0"],
@@ -392,6 +395,7 @@ def main() -> int:
                 cwd=probe_cwd,
                 imports=imports,
                 require_cuda=require_cuda_for(data, run_dir),
+                device=requested_device(run_dir) or "auto",
             )
             if not ok:
                 print(detail, file=sys.stderr)

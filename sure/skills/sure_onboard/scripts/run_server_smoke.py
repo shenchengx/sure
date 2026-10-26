@@ -48,6 +48,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "runtime" / "harness"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from model_child_env import model_child_env
+from sure.runtime.gpu_partition import enforce_gpu_context
 from sure.runtime.evaluation.task_registry import allows_empty_prediction
 from sure.runtime.prediction_payload import extract_mcp_payload, normalize_prediction_payload
 
@@ -374,12 +375,12 @@ def main() -> int:
                 # this server in. Layering them the other way would let a
                 # declared PYTHONPATH or PYTHONHOME be stripped as if it were
                 # harness interpreter state.
-                env={
+                env=enforce_gpu_context({
                     **model_child_env(),
                     **declared_env,
                     "PYTHONUNBUFFERED": "1",
                     "PYTHONIOENCODING": "utf-8",
-                },
+                }),
             )
             stderr_thread = threading.Thread(
                 target=_drain_stderr, args=(proc, server_stderr, stderr_handle), daemon=True
