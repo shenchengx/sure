@@ -43,6 +43,7 @@ from sure.site.gpu_partition import partition_command, partition_environment
 from sure.runtime.onboard_gpu import wrap_onboard_command
 from server_protocol import JSONL_SERVER_PROTOCOL
 from sure.runtime.evaluation.task_registry import normalize_task
+from sure.runtime.model.device_dtype import CUDA_DEVICE_RE, dtype_from_config
 from sure.runtime.model_server.tool_contract import tool_contracts
 from sure.runtime.uvenv import runtime_python_relative
 
@@ -106,16 +107,79 @@ def log_path_for(data: dict, kind: str, run_dir: Path, cwd: Path) -> Path:
     return run_dir / "artifacts" / f"{kind}_execution.log"
 
 
-def env_for(data: dict, validation_device: str | None = None) -> dict[str, str]:
+def concrete_device(value: str | None) -> str | None:
+    raw = str(value or "").strip().lower()
+    if raw == "cuda":
+        return "cuda:0"
+    if CUDA_DEVICE_RE.fullmatch(raw):
+        return f"cuda:{int(raw.split(':', 1)[1]) if ':' in raw else 0}"
+    return raw if raw in {"cpu", "mps"} else None
+
+
+def declared_dtype_for(data: dict, base: Path) -> str | None:
+    model_dir = resolve_path(data.get("model_dir") or data.get("wrapper_path"), base)
+    if model_dir is None:
+        resolved = base / "artifacts" / "model_input_resolved.json"
+        if resolved.is_file():
+            model_dir = resolve_path(read_json(resolved).get("model_dir"), base)
+    if model_dir is None or yaml is None:
+        return None
+    config_path = model_dir / "config.yaml"
+    if not config_path.is_file():
+        return None
+    try:
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        return dtype_from_config(config) if isinstance(config, dict) else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def rewrite_container_env(command: list[str] | str, updates: dict[str, str]) -> list[str] | str:
+    """Keep declared Docker/Podman environment consistent with local gates."""
+    if not isinstance(command, list) or not command or Path(command[0]).name not in {"docker", "podman"}:
+        return command
+    result = list(command)
+    seen: set[str] = set()
+    index = 0
+    while index < len(result):
+        token = result[index]
+        value_index: int | None = None
+        value: str | None = None
+        if token in {"-e", "--env"} and index + 1 < len(result):
+            value_index, value = index + 1, result[index + 1]
+        elif token.startswith("--env="):
+            value_index, value = index, token[6:]
+        if value is not None and "=" in value:
+            key, _ = value.split("=", 1)
+            if key in updates:
+                replacement = f"{key}={updates[key]}"
+                result[value_index] = f"--env={replacement}" if value_index == index else replacement
+                seen.add(key)
+        index += 1
+    insertion = result.index("--entrypoint") if "--entrypoint" in result else len(result)
+    flags: list[str] = []
+    for key, value in updates.items():
+        if key not in seen:
+            flags.extend(["-e", f"{key}={value}"])
+    result[insertion:insertion] = flags
+    return result
+
+
+def env_for(data: dict, validation_device: str | None = None, dtype: str | None = None) -> dict[str, str]:
     env = model_child_env()
-    if validation_device in ACTUAL_DEVICES:
-        env.setdefault("SURE_DEVICE", validation_device)
-        env.setdefault("DEVICE", validation_device)
     raw_env = data.get("env")
     if isinstance(raw_env, dict):
         for key, value in raw_env.items():
             if isinstance(key, str) and isinstance(value, (str, int, float, bool)):
                 env[key] = str(value)
+    if validation_device in ACTUAL_DEVICES:
+        target = concrete_device(validation_device) or validation_device
+        env["SURE_DEVICE"] = target
+        env["DEVICE"] = target
+        env["SURE_EVAL_DEVICE_ACTUAL"] = target
+    if dtype:
+        env["SURE_EVAL_APPROVED_DTYPE"] = dtype
+        env["SURE_MODEL_DTYPE"] = dtype
     # Artifact-declared variables may include model import paths, but they must
     # not be able to reintroduce Harness interpreter state after sanitization.
     return partition_environment(model_child_env(env), "onboard", device=validation_device or "auto")
@@ -341,13 +405,21 @@ def run_validation_command(
     repo_root = repo_root_for(run_dir)
     command = maybe_use_model_local_python(command, shell=shell, cwd=cwd)
     command = normalize_repo_relative_command(command, repo_root)
+    dtype = declared_dtype_for(data, run_dir)
+    updates: dict[str, str] = {}
+    target = concrete_device(validation_device)
+    if target:
+        updates.update({"DEVICE": target, "SURE_DEVICE": target, "SURE_EVAL_DEVICE_ACTUAL": target})
+    if dtype:
+        updates.update({"SURE_EVAL_APPROVED_DTYPE": dtype, "SURE_MODEL_DTYPE": dtype})
+    command = rewrite_container_env(command, updates)
 
     log_path = log_path_for(data, kind, run_dir, cwd)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     timeout_raw = data.get("timeout_seconds")
     timeout = float(timeout_raw) if isinstance(timeout_raw, (int, float)) and timeout_raw > 0 else 1800.0
-    command, child_env = partition_command(command, env_for(data, validation_device), "onboard", device=validation_device or "auto")
+    command, child_env = partition_command(command, env_for(data, validation_device, dtype), "onboard", device=validation_device or "auto")
     pooled_command = wrap_onboard_command(command, child_env, timeout=timeout, log_path=log_path.with_suffix(".gpu-lease.jsonl"))
     pooled = pooled_command is not command
     command = pooled_command
