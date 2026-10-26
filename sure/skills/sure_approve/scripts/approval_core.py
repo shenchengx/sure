@@ -37,6 +37,7 @@ from server_protocol import MCP_SERVER_PROTOCOL
 from sure.runtime import bundle_content
 from sure.runtime.model_server.launch import resolve_python_server_command
 from sure.runtime.model_server.tool_contract import ToolContractError, tool_contracts
+from sure.site.gpu_partition import partition_command
 from sure.site.loader import SitePolicyError, load_site_policy
 
 try:
@@ -993,7 +994,8 @@ def verify_runtime(run_dir: Path) -> dict[str, Any]:
             if container.get("gpu_required") is True:
                 command.extend(["--gpus", "all"])
             command.extend([image_ref, str(container["python_executable"]), f"{model_target}/validate.py"])
-            completed = subprocess.run(command, capture_output=True, text=True, timeout=1800, check=False)
+            command, child_env = partition_command(command, os.environ, "approve", device="auto" if container.get("gpu_required") is True else "cpu")
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=1800, check=False, env=child_env)
         smoke = {"command": command, "pull_stdout_sha256": sha256_bytes(pull.stdout.encode()), "exit_code": completed.returncode, "stdout_sha256": sha256_bytes(completed.stdout.encode()), "stderr": completed.stderr[-2000:]}
     if completed.returncode != 0:
         raise ApprovalError(f"candidate runtime verification failed: {smoke['stderr']}")

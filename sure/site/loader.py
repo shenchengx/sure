@@ -127,7 +127,7 @@ def validate_site_policy(value: Any) -> dict[str, Any]:
     execution = _mapping(root.get("execution"), "execution")
     _reject_unknown(
         execution,
-        {"surfaces", "local_runtimes", "vc_project", "vc_partitions", "vc_default_partition"},
+        {"surfaces", "local_runtimes", "gpu_partition", "vc_project", "vc_partitions", "vc_default_partition"},
         "execution",
     )
     surfaces = _unique_strings(execution.get("surfaces"), "execution.surfaces", absolute=False)
@@ -160,6 +160,13 @@ def validate_site_policy(value: Any) -> dict[str, Any]:
         },
         "execution": {"surfaces": surfaces, "local_runtimes": local_runtimes},
     }
+    if "gpu_partition" in execution:
+        partition = _mapping(execution["gpu_partition"], "execution.gpu_partition")
+        _reject_unknown(partition, {"onboard_gpu_uuid"}, "execution.gpu_partition")
+        uuid = _string(partition.get("onboard_gpu_uuid"), "execution.gpu_partition.onboard_gpu_uuid")
+        if re.fullmatch(r"GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", uuid) is None:
+            raise SitePolicyError("execution.gpu_partition.onboard_gpu_uuid must be a full lowercase GPU UUID")
+        policy["execution"]["gpu_partition"] = {"onboard_gpu_uuid": uuid}
     if "projection_root" in datasets:
         policy["datasets"]["projection_root"] = _absolute_path(
             datasets["projection_root"], "datasets.projection_root"

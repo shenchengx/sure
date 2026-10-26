@@ -5,8 +5,12 @@ from __future__ import annotations
 
 import re
 import os
+import sys
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+from sure.site.gpu_partition import partition_command
 
 from harness_runtime import harness_runtime_from_eval_input
 from deployment_binding import DEPLOYMENT_BINDING_V1, DEPLOYMENT_BINDING_V2
@@ -376,6 +380,7 @@ def build_local_container_command(
     for key in sorted(env):
         command.extend(["--env", f"{key}={env[key]}"])
     command.extend([str(binding["target_image_ref"]), container_path(entrypoint.resolve())])
+    command, _ = partition_command(command, {**os.environ, **env}, "infer", device=device_request, workers=workers)
     return command, {
         "image": binding["target_image"],
         "image_digest": binding["target_image_digest"],

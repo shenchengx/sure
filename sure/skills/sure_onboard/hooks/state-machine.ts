@@ -147,7 +147,7 @@ export const MODEL_TOOL_UNITS: Unit[] = [
 		schemaRef: "build_env_result.schema.json",
 		requiredFields: ["env_ready"],
 		gateScript: "check_env.py",
-		helperScripts: ["materialize_model_runtime.py"],
+		helperScripts: ["materialize_model_runtime.py", "run_gpu_command.py"],
 	},
 	{
 		id: "fetch_weights",
@@ -165,6 +165,7 @@ export const MODEL_TOOL_UNITS: Unit[] = [
 		schemaRef: "env_compat_result.schema.json",
 		requiredFields: ["compat_ok"],
 		gateScript: "check_env_compat.py",
+		helperScripts: ["run_gpu_command.py"],
 	},
 	{
 		id: "generate_wrapper",
@@ -219,7 +220,7 @@ export const MODEL_TOOL_UNITS: Unit[] = [
 		schemaRef: "docker_registry_result.schema.json",
 		requiredFields: ["schema", "status"],
 		gateScript: "check_container_package.py",
-		helperScripts: ["docker_runtime.py", "describe_harness_runtime.py"],
+		helperScripts: ["docker_runtime.py", "describe_harness_runtime.py", "run_gpu_command.py"],
 	},
 	{
 		id: "save_artifacts",

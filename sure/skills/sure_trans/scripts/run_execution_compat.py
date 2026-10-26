@@ -10,6 +10,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+from sure.site.gpu_partition import partition_command, partition_environment
+
 from vc_exec import (
     DEFAULT_CPUS,
     DEFAULT_GPUS,
@@ -61,11 +64,12 @@ def run_probe(image: str, use_gpu: bool) -> tuple[list[str], subprocess.Complete
     if use_gpu:
         command.extend(["--gpus", "all"])
     command.extend(["--entrypoint", "python", image, "-c", PROBE])
+    command, child_env = partition_command(command, agent_bin_cleared_env(), "trans", device="auto" if use_gpu else "cpu")
     started = time.monotonic()
     try:
         process = subprocess.run(
             command, check=False, capture_output=True, text=True, timeout=180,
-            env=agent_bin_cleared_env(),
+            env=child_env,
         )
     except OSError as error:
         raise ValueError(
@@ -79,7 +83,7 @@ def run_python_probe(python_executable: str) -> tuple[list[str], subprocess.Comp
     started = time.monotonic()
     process = subprocess.run(
         command, check=False, capture_output=True, text=True, timeout=180,
-        env=agent_bin_cleared_env(),
+        env=partition_environment(agent_bin_cleared_env(), "trans"),
     )
     return command, process, round((time.monotonic() - started) * 1000, 3)
 

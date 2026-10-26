@@ -16,6 +16,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(REPO_ROOT / "sure" / "runtime" / "harness"))
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+from sure.site.gpu_partition import partition_command, partition_environment
+
 from vc_exec import (
     DEFAULT_CPUS,
     DEFAULT_GPUS,
@@ -667,6 +670,7 @@ def main() -> int:
         log_path.write_text(rendered, encoding="utf-8")
         duration_ms = round((time.monotonic() - started) * 1000, 3)
     else:
+        command, env = partition_command(command, env, "trans", device=selected_device or "auto")
         if local_cuda:
             local_validation_dir = require_local_gpu_command(command, shell, run_dir, args.kind)
         rendered = command if isinstance(command, str) else " ".join(command)

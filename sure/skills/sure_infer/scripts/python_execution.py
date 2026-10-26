@@ -5,12 +5,16 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 import re
 from pathlib import Path
 from typing import Any, Mapping
 
 from container_execution import surface_env, surface_env_refuses
 from deployment_binding import DEPLOYMENT_BINDING_V2
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+from sure.site.gpu_partition import partition_environment
+
 from harness_runtime import harness_runtime_from_eval_input
 from evaluation_runtime import evaluation_runtime_from_eval_input
 from execution_provenance import (
@@ -174,6 +178,7 @@ def build_local_python_command(
         }
     )
     env.update(execution_provenance_env(execution_provenance_path, execution_provenance))
+    env = partition_environment(env, "infer", device=str((extra_env or {}).get("SURE_EVAL_DEVICE_REQUEST") or "auto"), workers=int(runtime.get("num_workers", 1)))
     return [str(harness_python), str(entrypoint.resolve())], env, {
         "runtime_kind": "python",
         "model_runtime": python,

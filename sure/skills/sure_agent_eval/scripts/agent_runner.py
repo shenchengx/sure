@@ -44,6 +44,7 @@ sys.path.insert(0, str(HARNESS_ROOT))
 
 from agent_spec import render_prompt  # noqa: E402
 from model_child_env import model_child_env  # noqa: E402
+from sure.site.gpu_partition import partition_command  # noqa: E402
 from sure.site.loader import load_site_policy  # noqa: E402
 from sure_eval.core.config import Config  # noqa: E402
 from sure_eval.datasets.dataset_manager import DatasetManager  # noqa: E402
@@ -116,6 +117,7 @@ class McpToolClient:
         # The server's own diagnostics belong in the run log; DEVNULL threw away
         # the only account of why a stage model failed to start. Popen takes the
         # file's descriptor, so the child writes to it directly: open it as bytes.
+        command, child_env = partition_command(command, child_env, "agent_eval", device="cpu" if child_env.get("DEVICE") == "cpu" else "auto")
         self._log = open(log_path, "ab") if log_path else None
         self._process = subprocess.Popen(
             command,

@@ -42,6 +42,8 @@ from harness_runtime import HarnessRuntimeBindingError, load_harness_runtime
 from resolve_evaluation_engine import resolve_engine_root
 from resolve_model_dir import APPROVED_MODELS_ROOT, resolve_approved_model
 from sure.site.loader import load_site_policy
+from sure.site.gpu_partition import partition_environment
+from sure.runtime.gpu_partition import GPU_CONTEXT
 
 
 TEXT_DEFAULT_METRICS = {
@@ -527,6 +529,9 @@ def _local_gpu_count() -> int:
     allocation `--gpus` later describes: an explicit CUDA_VISIBLE_DEVICES is
     the allocation, and otherwise nvidia-smi enumerates the machine.
     """
+    partitioned = partition_environment(os.environ, "infer")
+    if GPU_CONTEXT in partitioned:
+        return len(partitioned["CUDA_VISIBLE_DEVICES"].split(",")) if partitioned["CUDA_VISIBLE_DEVICES"] else 0
     visible = os.environ.get("CUDA_VISIBLE_DEVICES")
     if visible is not None:
         devices = [device.strip() for device in visible.split(",") if device.strip()]
@@ -576,7 +581,7 @@ def _plan_workers(
     if not datasets:
         raise EvalInputError("No datasets available for Worker planning")
     explicit = getattr(args, "num_workers", None)
-    available = _local_gpu_count()
+    available = 0 if getattr(args, "device", None) == "cpu" else _local_gpu_count()
     if explicit is not None and explicit > 1 and explicit > available:
         raise EvalInputError(
             f"num_workers={explicit} asks for {explicit} GPUs but this node provides {available}"
