@@ -27,7 +27,7 @@ class WorkerLimitTests(unittest.TestCase):
             manager.download_and_convert.return_value = path
             args = resolve_eval_input._build_parser().parse_args(["--model", "demo", "--datasets", "demo"])
             self.assertIsNone(args.num_workers)
-            for total, expected in ((5, 1), (999, 1), (1000, 2), (1999, 2), (2000, 4), (3999, 4), (4000, 7), (8000, 7)):
+            for total, expected in ((5, 1), (999, 1), (1000, 1), (1001, 2), (1999, 2), (2000, 2), (2001, 3), (3999, 4), (4000, 4), (4001, 5), (6001, 7), (8000, 8), (9001, 8)):
                 with self.subTest(total=total):
                     path.write_text('{}\n' * total + '\n', encoding="utf-8")
                     rows = [{"name": "demo", "requested_name": "/source/demo@v1", "task": "ASR"}]
@@ -39,8 +39,8 @@ class WorkerLimitTests(unittest.TestCase):
             args.max_samples = 32
             self.assertEqual(self._plan(args, manager, rows), (1, "auto"))
             self.assertEqual(rows[0]["selected_samples"], 32)
-            args.num_workers = 7
-            self.assertEqual(self._plan(args, manager, rows), (7, "explicit"))
+            args.num_workers = 8
+            self.assertEqual(self._plan(args, manager, rows), (8, "explicit"))
             args.max_samples = -1
             with self.assertRaisesRegex(resolve_eval_input.EvalInputError, "non-negative"):
                 self._plan(args, manager, rows)
@@ -57,11 +57,11 @@ class WorkerLimitTests(unittest.TestCase):
         """A large dataset on a small node plans what the node can run."""
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "task__asr.jsonl"
-            path.write_text('{}\n' * 5000, encoding="utf-8")
+            path.write_text('{}\n' * 12000, encoding="utf-8")
             manager = Mock()
             manager.download_and_convert.return_value = path
             args = resolve_eval_input._build_parser().parse_args(["--model", "demo", "--datasets", "demo"])
-            for available, expected in ((0, 1), (1, 1), (2, 2), (3, 2), (4, 4), (8, 7)):
+            for available, expected in ((0, 1), (1, 1), (2, 2), (3, 3), (4, 4), (6, 6), (7, 7), (8, 8), (16, 12)):
                 with self.subTest(available=available):
                     rows = [{"name": "demo", "requested_name": "/source/demo@v1", "task": "ASR"}]
                     self.assertEqual(self._plan(args, manager, rows, available=available), (expected, "auto"))
@@ -70,16 +70,16 @@ class WorkerLimitTests(unittest.TestCase):
     def test_an_explicit_count_above_the_node_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "task__asr.jsonl"
-            path.write_text('{}\n' * 5000, encoding="utf-8")
+            path.write_text('{}\n' * 12000, encoding="utf-8")
             manager = Mock()
             manager.download_and_convert.return_value = path
             args = resolve_eval_input._build_parser().parse_args(
-                ["--model", "demo", "--datasets", "demo", "--num-workers", "7"]
+                ["--model", "demo", "--datasets", "demo", "--num-workers", "8"]
             )
             rows = [{"name": "demo", "requested_name": "/source/demo@v1", "task": "ASR"}]
             with self.assertRaisesRegex(resolve_eval_input.EvalInputError, "this node provides 2"):
                 self._plan(args, manager, rows, available=2)
-            self.assertEqual(self._plan(args, manager, rows, available=8), (7, "explicit"))
+            self.assertEqual(self._plan(args, manager, rows, available=8), (8, "explicit"))
 
     def test_mixed_datasets_allocate_maximum_before_submission(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -93,9 +93,9 @@ class WorkerLimitTests(unittest.TestCase):
             for names in (("X", "Y"), ("Y", "X")):
                 rows = [{"name": name, "task": "ASR"} for name in names]
                 maximum, selection = self._plan(args, manager, rows)
-                self.assertEqual((maximum, selection), (7, "auto"))
-                self.assertEqual({row["name"]: row["planned_workers"] for row in rows}, {"X": 1, "Y": 7})
-                self.assertEqual(resolve_eval_input._parallel_request(args, maximum), 7)
+                self.assertEqual((maximum, selection), (8, "auto"))
+                self.assertEqual({row["name"]: row["planned_workers"] for row in rows}, {"X": 1, "Y": 8})
+                self.assertEqual(resolve_eval_input._parallel_request(args, maximum), 8)
             args.device = "cpu"
             with self.assertRaisesRegex(resolve_eval_input.EvalInputError, "device"):
                 resolve_eval_input._parallel_request(args, maximum)
@@ -124,15 +124,15 @@ class WorkerLimitTests(unittest.TestCase):
         parser = resolve_eval_input._build_parser()
         base = ["--model", "demo", "--datasets", "/data/demo"]
         self.assertEqual(resolve_eval_input._parallel_request(parser.parse_args(base)), 1)
-        for workers in (1, 7):
+        for workers in (1, 3, 6, 8, 16):
             with self.subTest(workers=workers):
                 args = parser.parse_args(base + ["--num-workers", str(workers)])
                 self.assertEqual(resolve_eval_input._parallel_request(args), workers)
-        for workers in (0, -1, 3, 5, 6, 8, 9, 100, True, 1.5, "8"):
+        for workers in (0, -1, True, 1.5, "8"):
             with self.subTest(workers=workers):
                 args = parser.parse_args(base)
                 args.num_workers = workers
-                with self.assertRaisesRegex(resolve_eval_input.EvalInputError, "one of 1, 2, 4, or 7"):
+                with self.assertRaisesRegex(resolve_eval_input.EvalInputError, "positive integer"):
                     resolve_eval_input._parallel_request(args)
         for value in ("1.5", "abc", "true"):
             with self.subTest(value=value), contextlib.redirect_stderr(io.StringIO()):
@@ -167,27 +167,27 @@ class WorkerLimitTests(unittest.TestCase):
                 "RUN_DIR": str(output), "SURE_EVAL_PUBLISHED_RUN_DIR": str(output),
                 "MODEL_PYTHON": "/model/bin/python", "DATASETS": "/data/demo", "DEVICE": "cuda",
             }
-            for value in ("0", "-1", "9", "100", "1.5", "abc"):
+            for value in ("0", "-1", "1.5", "abc"):
                 with self.subTest(value=value), patch.dict(os.environ, {**env, "SURE_INFER_NUM_WORKERS": value}, clear=True):
-                    with self.assertRaisesRegex(infer_entrypoint.StageError, "one of 1, 2, 4, or 7"):
+                    with self.assertRaisesRegex(infer_entrypoint.StageError, "positive integer"):
                         infer_entrypoint.stage_guards()
-            for value in ("1", "7"):
+            for value in ("1", "6", "8", "16"):
                 with self.subTest(value=value), patch.dict(os.environ, {**env, "SURE_INFER_NUM_WORKERS": value}, clear=True):
                     with contextlib.redirect_stdout(io.StringIO()):
                         self.assertEqual(infer_entrypoint.stage_guards().num_workers, int(value))
 
     def test_gpu_discovery_rejects_invalid_counts_before_probing(self) -> None:
         with patch.object(parallel_predictions.subprocess, "run") as probe:
-            for workers in (0, -1, 1, 3, 5, 6, 8, 9, True, 2.5):
-                with self.subTest(workers=workers), self.assertRaisesRegex(ValueError, "one of 2, 4, or 7"):
+            for workers in (0, -1, 1, True, 2.5):
+                with self.subTest(workers=workers), self.assertRaisesRegex(ValueError, "at least 2"):
                     parallel_predictions.discover_gpus(workers, {})
             probe.assert_not_called()
         with patch.object(parallel_predictions.subprocess, "run", side_effect=[
             subprocess.CompletedProcess([], 0, "", ""),
-            subprocess.CompletedProcess([], 0, '{"count":7}\n', ""),
+            subprocess.CompletedProcess([], 0, '{"count":8}\n', ""),
         ]):
-            self.assertEqual(parallel_predictions.discover_gpus(7, {"MODEL_PYTHON": "/model/bin/python"}),
-                             [str(index) for index in range(7)])
+            self.assertEqual(parallel_predictions.discover_gpus(8, {"MODEL_PYTHON": "/model/bin/python"}),
+                             [str(index) for index in range(8)])
 
 
 if __name__ == "__main__":

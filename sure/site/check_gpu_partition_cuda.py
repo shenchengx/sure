@@ -46,7 +46,7 @@ def main() -> None:
         "schema": "sure.site.policy.v1", "site_id": "gpu-smoke", "policy_version": 1,
         "storage": {"approved_models_roots": ["/tmp/models"], "forbidden_output_roots": ["/tmp/models"], "runtime_root": "/tmp/runtime"},
         "datasets": {"allowed_source_roots": {"test": "/tmp/data"}},
-        "execution": {"surfaces": ["local"], "gpu_partition": {"onboard_gpu_uuid": args.onboard_uuid}},
+        "execution": {"surfaces": ["local"], "gpu_partition": {"onboard_gpu_uuids": [args.onboard_uuid]}},
     }
 
     def run(case: tuple[str, str, int]) -> dict:

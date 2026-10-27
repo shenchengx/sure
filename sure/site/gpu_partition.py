@@ -17,8 +17,8 @@ def partition_environment(
     env: Mapping[str, str], stage: str, *, device: str = "auto", workers: int = 1,
 ) -> dict[str, str]:
     device = device.lower()
-    if workers not in {1, 2, 4, 7}:
-        raise GpuPartitionError("GPU_PARTITION: workers must be one of 1, 2, 4, or 7")
+    if type(workers) is not int or workers < 1:
+        raise GpuPartitionError("GPU_PARTITION: workers must be a positive integer")
     inherited = read_context(os.environ)
     if inherited is not None:
         if stage != inherited["stage"]:
@@ -37,7 +37,7 @@ def partition_environment(
             raise GpuPartitionError(f"GPU_PARTITION: unsupported device {device!r}")
         if stage not in STAGES:
             raise GpuPartitionError(f"GPU_PARTITION: unknown stage {stage!r}")
-        onboard = policy["onboard_gpu_uuid"]
+        onboard = policy["onboard_gpu_uuids"]
         indices = {}
         if device != "cpu":
             try:
@@ -45,18 +45,18 @@ def partition_environment(
                 indices = dict(line.strip().split(", ", 1) for line in probe.stdout.splitlines() if line.strip())
             except (OSError, subprocess.SubprocessError, ValueError) as exc:
                 raise GpuPartitionError(f"GPU_PARTITION: cannot enumerate node GPUs: {exc}") from exc
-            if onboard not in indices.values():
+            if not set(onboard).issubset(indices.values()):
                 raise GpuPartitionError(f"GPU_PARTITION: configured onboard UUID is absent: {onboard}")
         devices = list(indices.values())
         if device != "cpu" and "CUDA_VISIBLE_DEVICES" in os.environ:
             devices = narrow_devices(os.environ["CUDA_VISIBLE_DEVICES"], devices, indices)
-        devices = [item for item in devices if (item == onboard) == (stage == "onboard")]
+        devices = [item for item in devices if (item in onboard) == (stage == "onboard")]
         requested = device.lower()
         if requested.startswith("cuda:"):
             devices = narrow_devices(requested.split(":", 1)[1], devices, indices)
         if requested != "cpu" and not devices:
             raise GpuPartitionError(f"GPU_PARTITION: no permitted GPU for stage {stage}")
-        context = {"stage": stage, "onboard_uuid": onboard, "devices": devices, "host_indices": indices, "policy_path": loaded["path"], "policy_sha256": loaded["sha256"]}
+        context = {"stage": stage, "onboard_uuids": onboard, "devices": devices, "host_indices": indices, "policy_path": loaded["path"], "policy_sha256": loaded["sha256"]}
         result = enforce_gpu_context(env, device="cpu" if requested == "cpu" else "auto", source={GPU_CONTEXT: json.dumps(context)})
     context = read_context(result)
     if context["devices"] and workers > len(context["devices"]):

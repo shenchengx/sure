@@ -34,8 +34,8 @@ def atomic_json(path: Path, payload: dict[str, Any]) -> None:
 
 def discover_gpus(workers: int, env: dict[str, str]) -> list[str]:
     """Keep the allocation's visibility; prove CUDA availability in Model Python."""
-    if type(workers) is not int or workers not in {2, 4, 7}:
-        raise ValueError("Parallel controller requires num_workers to be one of 2, 4, or 7")
+    if type(workers) is not int or workers < 2:
+        raise ValueError("Parallel controller requires num_workers to be an integer of at least 2")
     visible = env.get("CUDA_VISIBLE_DEVICES")
     devices = [value.strip() for value in visible.split(",")] if visible is not None else []
     if visible is not None and (not all(devices) or len(set(devices)) != len(devices) or "-1" in devices):
@@ -245,8 +245,8 @@ def _error_kind(text: str, exit_code: int) -> str:
 
 def run_dataset(ctx: Any, dataset: str) -> dict[str, Any]:
     """Process one dataset to completion (or bounded failure) before the next."""
-    if type(ctx.num_workers) is not int or ctx.num_workers not in {1, 2, 4, 7}:
-        raise ValueError("Dataset controller requires num_workers to be one of 1, 2, 4, or 7")
+    if type(ctx.num_workers) is not int or ctx.num_workers < 1:
+        raise ValueError("Dataset controller requires num_workers to be a positive integer")
     if len(ctx.gpu_devices) < ctx.num_workers:
         raise ValueError("Dataset Workers exceed the available GPU allocation")
     assert ctx.datasets_root is not None

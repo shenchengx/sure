@@ -21,7 +21,7 @@ POLICY = {
     "schema": "sure.site.policy.v1", "site_id": "test", "policy_version": 1,
     "storage": {"approved_models_roots": ["/tmp/models"], "forbidden_output_roots": ["/tmp/models"], "runtime_root": "/tmp/runtime"},
     "datasets": {"allowed_source_roots": {"test": "/tmp/data"}},
-    "execution": {"surfaces": ["local"], "gpu_partition": {"onboard_gpu_uuid": GPUS[7]}},
+    "execution": {"surfaces": ["local"], "gpu_partition": {"onboard_gpu_uuids": [GPUS[7]]}},
 }
 LOADED = {"policy": POLICY, "path": "/tmp/test-policy.yaml", "sha256": "test"}
 
@@ -112,13 +112,45 @@ class PartitionTests(unittest.TestCase):
         env = partition_environment({}, "infer", workers=4)
         self.assertEqual(env["CUDA_VISIBLE_DEVICES"].split(","), GPUS[:4])
         self.assertEqual(len(read_context(partition_environment({}, "infer", workers=7))["devices"]), 7)
-        with self.assertRaisesRegex(GpuPartitionError, "one of 1, 2, 4, or 7"):
+        with self.assertRaisesRegex(GpuPartitionError, "capacity"):
             partition_environment({}, "infer", workers=8)
 
-    def test_workers_use_only_supported_partition_sizes(self):
-        for workers in [3, 5, 6, 8]:
-            with self.subTest(workers=workers), self.assertRaisesRegex(GpuPartitionError, "one of 1, 2, 4, or 7"):
+    def test_workers_use_remaining_partition_capacity(self):
+        for workers in range(1, 8):
+            self.assertIn("CUDA_VISIBLE_DEVICES", partition_environment({}, "infer", workers=workers))
+        for workers in [0, -1, True, 1.5]:
+            with self.subTest(workers=workers), self.assertRaisesRegex(GpuPartitionError, "positive integer"):
                 partition_environment({}, "infer", workers=workers)
+
+    def test_two_reserved_gpus_and_six_infer_workers(self):
+        policy = copy.deepcopy(LOADED)
+        policy["policy"]["execution"]["gpu_partition"] = {"onboard_gpu_uuids": GPUS[6:]}
+        with patch("sure.site.gpu_partition.load_site_policy", return_value=policy):
+            onboard = partition_environment({}, "onboard")
+            self.assertEqual(onboard["CUDA_VISIBLE_DEVICES"].split(","), GPUS[6:])
+            self.assertEqual(read_context(onboard)["onboard_uuids"], GPUS[6:])
+            for stage in ["infer", "trans", "approve", "agent_eval", "eval"]:
+                self.assertEqual(partition_environment({}, stage)["CUDA_VISIBLE_DEVICES"].split(","), GPUS[:6])
+            self.assertEqual(partition_environment({}, "infer", workers=6)["CUDA_VISIBLE_DEVICES"].split(","), GPUS[:6])
+            with self.assertRaisesRegex(GpuPartitionError, "capacity"):
+                partition_environment({}, "infer", workers=7)
+            for index in [6, 7]:
+                self.assertEqual(partition_environment({}, "onboard", device=f"cuda:{index}")["CUDA_VISIBLE_DEVICES"], GPUS[index])
+                with self.assertRaisesRegex(GpuPartitionError, "outside"):
+                    partition_environment({}, "infer", device=f"cuda:{index}")
+            os.environ["CUDA_VISIBLE_DEVICES"] = "0,7"
+            self.assertEqual(partition_environment({}, "onboard")["CUDA_VISIBLE_DEVICES"], GPUS[7])
+            self.assertEqual(partition_environment({}, "infer")["CUDA_VISIBLE_DEVICES"], GPUS[0])
+
+    def test_multigpu_context_cannot_cross_or_widen_partition(self):
+        context = {"stage": "onboard", "onboard_uuids": GPUS[6:], "devices": GPUS[6:]}
+        env = enforce_gpu_context({"CUDA_VISIBLE_DEVICES": ",".join(GPUS)}, source={GPU_CONTEXT: json.dumps(context)})
+        self.assertEqual(env["CUDA_VISIBLE_DEVICES"].split(","), GPUS[6:])
+        for stage, devices in [("infer", [GPUS[6]]), ("onboard", [GPUS[0]])]:
+            with self.assertRaises(GpuPartitionError):
+                read_context({GPU_CONTEXT: json.dumps({**context, "stage": stage, "devices": devices})})
+        command = restrict_docker_command(["docker", "run", "--gpus", "all", "image"], env)
+        self.assertEqual(command[command.index("--gpus") + 1], '"device=' + ",".join(GPUS[6:]) + '"')
 
     def test_model_environment_cannot_select_or_forge_devices(self):
         fake = partition_environment({}, "onboard")
@@ -211,13 +243,13 @@ class PartitionTests(unittest.TestCase):
 
 class PolicyTests(unittest.TestCase):
     def test_valid_config_and_absent_config(self):
-        self.assertEqual(validate_site_policy(POLICY)["execution"]["gpu_partition"], {"onboard_gpu_uuid": GPUS[7]})
+        self.assertEqual(validate_site_policy(POLICY)["execution"]["gpu_partition"], {"onboard_gpu_uuids": [GPUS[7]]})
         value = copy.deepcopy(POLICY)
         del value["execution"]["gpu_partition"]
         self.assertNotIn("gpu_partition", validate_site_policy(value)["execution"])
 
     def test_invalid_configuration(self):
-        for field in [None, {}, [], {"onboard_gpu_uuid": "7"}, {"onboard_gpu_uuid": [GPUS[7]]}, {"onboard_gpu_uuid": GPUS[7], "enabled": True}]:
+        for field in [{"onboard_gpu_uuids": []}, {"onboard_gpu_uuids": [GPUS[7], GPUS[7]]}, {"onboard_gpu_uuids": "7"}, {"onboard_gpu_uuids": ["7"]}, {"onboard_gpu_uuids": [GPUS[7]], "onboard_gpu_uuid": GPUS[7]}, None, {}, [], {"onboard_gpu_uuid": GPUS[7]}, {"onboard_gpu_uuid": "7"}, {"onboard_gpu_uuid": [GPUS[7]]}, {"onboard_gpu_uuid": GPUS[7], "enabled": True}]:
             with self.subTest(field=field):
                 value = copy.deepcopy(POLICY)
                 value["execution"]["gpu_partition"] = field
@@ -227,7 +259,7 @@ class PolicyTests(unittest.TestCase):
 
 class SubprocessTests(unittest.TestCase):
     def test_model_helper_is_stdlib_only_and_enforces_parent(self):
-        context = {"stage": "approve", "onboard_uuid": GPUS[7], "devices": GPUS[:2]}
+        context = {"stage": "approve", "onboard_uuids": [GPUS[7]], "devices": GPUS[:2]}
         code = "import json; from sure.runtime.gpu_partition import enforce_gpu_context; print(json.dumps(enforce_gpu_context({'CUDA_VISIBLE_DEVICES':'7'})))"
         env = {**os.environ, GPU_CONTEXT: json.dumps(context), "CUDA_VISIBLE_DEVICES": GPUS[1]}
         # -S proves that no site-packages (including PyYAML) is required.

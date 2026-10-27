@@ -11,20 +11,22 @@ argument and predictions are identical to a single-server run.
 
 `num_workers` is optional.
 
-| Selected samples (after `max_samples`) | Workers |
-| --- | --- |
-| fewer than 1000 | 1 |
-| 1000 – 1999 | 2 |
-| 2000 – 3999 | 4 |
-| 4000 or more | 7 |
+The automatic count is `ceil(selected_samples / 1000)`, capped at the GPUs
+available to inference after stage partitioning and any inherited allocation.
+Selected samples are counted after `max_samples` is applied.
 
-Supported requested counts are **1, 2, 4, and 7**. The planned count is rounded down
-to the largest supported count that fits the GPUs available to inference. The cap is the
-allocation a local run actually gets: `CUDA_VISIBLE_DEVICES` when it is set,
-otherwise the `nvidia-smi` device list. A 4000-sample dataset on a two-GPU node plans
-two Workers, not seven, so automatic selection never asks for hardware the node does
-not have. With no usable GPU the plan stays at one Worker and the run proceeds on the
-existing single-server path.
+| Selected samples | Workers before the GPU cap |
+| --- | --- |
+| 1–1000 | 1 |
+| 1001–2000 | 2 |
+| 2001–3000 | 3 |
+| 5001–6000 | 6 |
+| 6001–7000 | 7 |
+
+Requested counts may be any positive integer that fits the available GPU count.
+For example, on an eight-GPU node with two onboard GPUs, a 7060-sample dataset
+plans six Workers. There is no fixed 1/2/4/7 tier or eight-Worker limit. With no
+usable GPU, automatic planning keeps one Worker for the existing CPU path.
 
 An explicit `num_workers` is honoured up to the node's GPU count. Above it, input
 resolution fails before any model is loaded:
@@ -59,11 +61,25 @@ Both local surfaces work:
 - **`local_python`** — the host allocation is already the truth, so the node's
   `CUDA_VISIBLE_DEVICES` reaches the entrypoint unchanged.
 
-When `execution.gpu_partition.onboard_gpu_uuid` is configured, that physical GPU
-is reserved for onboard and excluded from inference before worker planning. The
-launchers restrict Docker and Python environments to the remaining GPU UUIDs;
-each worker still uses process-local `cuda:0`. A policy-restricted Docker launch
-forwards UUID visibility rather than unrestricted host ordinals.
+When `execution.gpu_partition.onboard_gpu_uuids` is configured, all listed physical
+GPUs are reserved for onboard and excluded from inference before worker planning:
+
+```yaml
+execution:
+  gpu_partition:
+    onboard_gpu_uuids:
+      - GPU-b7e42452-fcc6-f8a2-b5e6-cd294ccdc924
+      - GPU-7c2abd9a-d3cb-b803-3569-0f20096294c8
+```
+
+Use full UUIDs queried on the execution node. A one-item list reserves one GPU.
+The list must be nonempty and unique; the former singular `onboard_gpu_uuid` field
+is rejected and must be migrated to the list. All configured UUIDs must exist on
+the node; inherited visibility may further narrow each stage's allocation.
+Launchers restrict Docker and Python environments to the stage's GPU UUIDs. Each
+infer Worker still uses process-local `cuda:0`. Onboard sees its permitted pool;
+reserving multiple GPUs does not add model parallelism or distribute concurrent
+onboard tasks automatically. Run contexts record the pool in `onboard_uuids`.
 
 The smoke pass runs first, on one GPU, under `parallel_inference/smoke/`, so a broken
 model server is caught before the full dataset is started.

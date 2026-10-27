@@ -1,4 +1,5 @@
 """Enabled-policy checks at the real launch builders, using existing fixtures."""
+import copy
 import os
 import subprocess
 import sys
@@ -16,11 +17,13 @@ from sure.site.test_gpu_partition import GPUS, LOADED
 
 
 class LaunchTests(unittest.TestCase):
-    def policy(self):
+    def policy(self, reserved=1):
         stack = ExitStack()
         self.addCleanup(stack.close)
         stack.enter_context(patch.dict(os.environ, {}, clear=True))
-        stack.enter_context(patch("sure.site.gpu_partition.load_site_policy", return_value=LOADED))
+        loaded = copy.deepcopy(LOADED)
+        loaded["policy"]["execution"]["gpu_partition"]["onboard_gpu_uuids"] = GPUS[-reserved:]
+        stack.enter_context(patch("sure.site.gpu_partition.load_site_policy", return_value=loaded))
         stack.enter_context(patch("sure.site.gpu_partition.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "\n".join(f"{i}, {gpu}" for i, gpu in enumerate(GPUS)), "")))
 
     def test_real_container_builder_single_and_multi_worker(self):
@@ -80,6 +83,13 @@ class LaunchTests(unittest.TestCase):
     def test_worker_auto_capacity_excludes_onboard(self):
         self.policy()
         self.assertEqual(resolve_eval_input._local_gpu_count(), 7)
+
+    def test_two_reserved_gpus_reduce_automatic_infer_capacity(self):
+        self.policy(reserved=2)
+        capacity = resolve_eval_input._local_gpu_count()
+        self.assertEqual(capacity, 6)
+        for selected, expected in [(1000, 1), (1001, 2), (2001, 3), (5001, 6), (7060, 6)]:
+            self.assertEqual(resolve_eval_input._auto_workers(selected, capacity), expected)
 
     def test_onboard_validation_environment_overrides_artifact(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sure_onboard/scripts"))

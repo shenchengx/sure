@@ -198,7 +198,7 @@ export function preStart(ctx: SureHookContext): SureHookResult {
 	}
 	if (missing.length > 0) {
 		return failure(
-			`Missing required /sure_infer parameters: ${missing.join(", ")}. Usage: /sure_infer model=<name> datasets=<source_path[@version][,source_path[@version]...]> [dataset_source_key=<key> (recorded only, does not select a root)] [datasets_root=<writable_projection_root>] [protocol=standard_system|strict_core] [execution=auto|local] [num_workers=<1|2|4|7> (omitted: automatic per dataset, capped at the GPUs this node provides)] [device=auto|cpu|cuda[:index]] [max_samples=...] [metrics=<metric[,metric...]>] [require_nonempty_predictions=true|false] [run_id=<id>] [output_dir=<abs_dir>] [config=<harness_config.yaml>]`,
+			`Missing required /sure_infer parameters: ${missing.join(", ")}. Usage: /sure_infer model=<name> datasets=<source_path[@version][,source_path[@version]...]> [dataset_source_key=<key> (recorded only, does not select a root)] [datasets_root=<writable_projection_root>] [protocol=standard_system|strict_core] [execution=auto|local] [num_workers=<positive integer> (omitted: ceil(selected_samples/1000), capped at available infer GPUs)] [device=auto|cpu|cuda[:index]] [max_samples=...] [metrics=<metric[,metric...]>] [require_nonempty_predictions=true|false] [run_id=<id>] [output_dir=<abs_dir>] [config=<harness_config.yaml>]`,
 			"Missing required parameters.",
 		);
 	}
