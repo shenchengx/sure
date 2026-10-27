@@ -371,7 +371,7 @@ class ParallelTests(unittest.TestCase):
         self.assertEqual(resolve_eval_input._parallel_request(parser.parse_args(base + ["--num-workers", "4"])), 4)
         # An omitted count is the automatic path, not an error.
         self.assertIsNone(parser.parse_args(base).num_workers)
-        for flags in (("--num-workers", "0"), ("--num-workers", "9"),
+        for flags in (("--num-workers", "0"), ("--num-workers", "-1"),
                       ("--num-workers", "2", "--device", "cpu"),
                       ("--num-workers", "2", "--device", "cuda:0")):
             with self.subTest(flags=flags), self.assertRaises(resolve_eval_input.EvalInputError):

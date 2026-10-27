@@ -39,18 +39,20 @@ def read_context(source: Mapping[str, str]) -> dict | None:
     try:
         value = json.loads(raw)
         devices = value["devices"]
-        onboard = value["onboard_uuid"]
+        onboard = value["onboard_uuids"]
         if value["stage"] not in STAGES or not isinstance(devices, list):
             raise ValueError("invalid stage/devices")
-        if not re.fullmatch(GPU_UUID_PATTERN, onboard):
+        if (not isinstance(onboard, list) or not onboard
+                or any(not isinstance(item, str) or not re.fullmatch(GPU_UUID_PATTERN, item) for item in onboard)
+                or len(set(onboard)) != len(onboard)):
             raise ValueError("invalid onboard UUID")
         if any(not isinstance(item, str) or not re.fullmatch(GPU_UUID_PATTERN, item) for item in devices):
             raise ValueError("invalid device UUID")
         if len(set(devices)) != len(devices):
             raise ValueError("duplicate devices")
-        if any((item == onboard) != (value["stage"] == "onboard") for item in devices):
+        if any((item in onboard) != (value["stage"] == "onboard") for item in devices):
             raise ValueError("device crosses stage boundary")
-        return value
+        return {**value, "onboard_uuids": onboard}
     except (ValueError, TypeError, KeyError) as exc:
         raise GpuPartitionError(f"GPU_PARTITION: invalid inherited context: {exc}") from exc
 

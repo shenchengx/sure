@@ -39,7 +39,7 @@
 			"type": "object",
 			"required": ["requested_workers", "gpu_devices", "datasets", "recovery_available"],
 			"properties": {
-				"requested_workers": { "type": "integer", "enum": [1, 2, 4, 7] },
+				"requested_workers": { "type": "integer", "minimum": 1 },
 				"worker_selection": { "enum": ["auto", "explicit"] },
 				"gpu_devices": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
 				"recovery_available": { "type": "boolean" },
@@ -50,10 +50,10 @@
 						"required": ["dataset", "effective_workers", "expected", "generated", "status", "report_path"],
 						"properties": {
 							"dataset": { "type": "string" },
-							"planned_workers": { "type": "integer", "enum": [1, 2, 4, 7] },
+							"planned_workers": { "type": "integer", "minimum": 1 },
 							"total_samples": { "type": "integer", "minimum": 0 },
 							"selected_samples": { "type": "integer", "minimum": 0 },
-							"effective_workers": { "type": "integer", "minimum": 0, "maximum": 7 },
+							"effective_workers": { "type": "integer", "minimum": 0 },
 							"expected": { "type": "integer", "minimum": 0 },
 							"generated": { "type": "integer", "minimum": 0 },
 							"status": { "enum": ["pending", "running", "completed", "failed", "skipped"] },

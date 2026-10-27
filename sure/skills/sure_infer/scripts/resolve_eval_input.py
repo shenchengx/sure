@@ -57,7 +57,6 @@ TEXT_DEFAULT_METRICS = {
     "SLU": "accuracy",
     "SPEECH_UNDERSTANDING": "accuracy",
 }
-VALID_WORKER_COUNTS = (1, 2, 4, 7)
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._=-]{0,199}$")
 
 # Approved models and promoted results both live below the configured trust
@@ -508,8 +507,8 @@ def _parallel_request(args: Any, workers: int | None = None) -> int:
         workers = getattr(args, "num_workers", None)
         if workers is None:
             workers = 1  # Validate explicit input before resolving datasets.
-    if isinstance(workers, bool) or not isinstance(workers, int) or workers not in VALID_WORKER_COUNTS:
-        raise EvalInputError("num_workers must be one of 1, 2, 4, or 7")
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
+        raise EvalInputError("num_workers must be a positive integer")
     device = str(args.device or "auto").strip().lower()
     if workers > 1 and device not in {"auto", "cuda"}:
         raise EvalInputError("num_workers > 1 requires device=auto or device=cuda")
@@ -554,22 +553,11 @@ def _local_gpu_count() -> int:
 
 
 def _auto_workers(selected: int, available: int) -> int:
-    """Size the pool by sample count, then by what the node actually has.
+    """One Worker per 1000 selected samples, capped by the stage allocation.
 
-    The sample thresholds say how much parallel work is worth starting. They
-    are not a claim about the hardware: a two-GPU node given a 4000-sample
-    dataset must plan two Workers, not eight, or the run fails at GPU discovery
-    for a dataset it could have processed.
+    Keep one Worker when no GPU is available for the existing CPU path.
     """
-    if selected < 1000:
-        planned = 1
-    elif selected < 2000:
-        planned = 2
-    elif selected < 4000:
-        planned = 4
-    else:
-        planned = 8
-    return max((count for count in VALID_WORKER_COUNTS if count <= min(planned, available)), default=1)
+    return max(1, min((selected + 999) // 1000, available))
 
 
 def _plan_workers(
@@ -1008,7 +996,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--num-workers",
         type=int,
-        help="Override automatic per-dataset Worker selection; allowed values: 1, 2, 4, 7",
+        help="Override automatic per-dataset Worker selection; a positive integer capped by available GPUs",
     )
     parser.add_argument("--execution", choices=("auto", "local"))
     parser.add_argument(

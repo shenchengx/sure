@@ -29,7 +29,7 @@ export interface SitePolicy {
 	execution: {
 		surfaces: ExecutionSurface[];
 		local_runtimes: LocalRuntime[];
-		gpu_partition?: { onboard_gpu_uuid: string };
+		gpu_partition?: { onboard_gpu_uuids: string[] };
 		vc_project?: string;
 		vc_partitions?: string[];
 		vc_default_partition?: string;
@@ -241,12 +241,16 @@ export function validateSitePolicy(value: unknown): SitePolicy {
 	};
 	if (execution.gpu_partition !== undefined) {
 		const partition = expectRecord(execution.gpu_partition, "execution.gpu_partition");
-		rejectUnknown(partition, ["onboard_gpu_uuid"], "execution.gpu_partition");
-		const uuid = expectString(partition.onboard_gpu_uuid, "execution.gpu_partition.onboard_gpu_uuid");
-		if (!/^GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uuid)) {
-			throw new Error("execution.gpu_partition.onboard_gpu_uuid must be a full lowercase GPU UUID");
+		rejectUnknown(partition, ["onboard_gpu_uuids"], "execution.gpu_partition");
+		const uuids = expectUniqueStrings(
+			partition.onboard_gpu_uuids,
+			"execution.gpu_partition.onboard_gpu_uuids",
+			false,
+		);
+		if (uuids.some((uuid) => !/^GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uuid))) {
+			throw new Error("execution.gpu_partition UUIDs must be full lowercase GPU UUIDs");
 		}
-		policy.execution.gpu_partition = { onboard_gpu_uuid: uuid };
+		policy.execution.gpu_partition = { onboard_gpu_uuids: uuids };
 	}
 	if (datasets.projection_root !== undefined) {
 		policy.datasets.projection_root = expectAbsolutePath(datasets.projection_root, "datasets.projection_root");

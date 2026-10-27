@@ -55,9 +55,9 @@
 				"gpu_partition": {
 					"type": "object",
 					"additionalProperties": false,
-					"required": ["onboard_gpu_uuid"],
+					"required": ["onboard_gpu_uuids"],
 					"properties": {
-						"onboard_gpu_uuid": { "type": "string", "pattern": "^GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }
+						"onboard_gpu_uuids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" } }
 					}
 				},
 				"local_runtimes": {

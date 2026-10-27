@@ -16,15 +16,24 @@ afterEach(() => {
 
 describe("GPU partition site policy parity", () => {
 	it.each([
-		{ onboard_gpu_uuid: uuid },
-		null,
-		{},
-		[],
-		{ onboard_gpu_uuid: "7" },
-		{ onboard_gpu_uuid: [uuid] },
-		{ onboard_gpu_uuid: uuid, enabled: true },
-		{ onboard_gpu_uuid: "GPU-ABCDEF00-0000-0000-0000-000000000000" },
-	])("agrees with Python for %j", (partition) => {
+		{ partition: { onboard_gpu_uuid: uuid }, valid: false },
+		{ partition: { onboard_gpu_uuids: [uuid] }, valid: true },
+		{ partition: { onboard_gpu_uuids: [uuid, "GPU-00000006-0000-0000-0000-000000000000"] }, valid: true },
+		...[
+			null,
+			{},
+			[],
+			{ onboard_gpu_uuid: "7" },
+			{ onboard_gpu_uuid: [uuid] },
+			{ onboard_gpu_uuid: uuid, enabled: true },
+			{ onboard_gpu_uuid: "GPU-ABCDEF00-0000-0000-0000-000000000000" },
+			{ onboard_gpu_uuids: [] },
+			{ onboard_gpu_uuids: [uuid, uuid] },
+			{ onboard_gpu_uuids: "7" },
+			{ onboard_gpu_uuids: ["7"] },
+			{ onboard_gpu_uuid: uuid, onboard_gpu_uuids: [uuid] },
+		].map((partition) => ({ partition, valid: false })),
+	])("agrees with Python for %j", ({ partition, valid }) => {
 		const directory = mkdtempSync(join(tmpdir(), "sure-gpu-policy-"));
 		directories.push(directory);
 		const path = join(directory, "site.yaml");
@@ -45,13 +54,7 @@ describe("GPU partition site policy parity", () => {
 		);
 		const environment = { ...process.env, SURE_SITE_POLICY: path };
 		const python = spawnSync("python3", [loader], { env: environment, encoding: "utf8" });
-		if (
-			partition &&
-			!Array.isArray(partition) &&
-			"onboard_gpu_uuid" in partition &&
-			partition.onboard_gpu_uuid === uuid &&
-			Object.keys(partition).length === 1
-		) {
+		if (valid) {
 			expect(python.status, python.stderr).toBe(0);
 			expect(resolveSitePolicy({ environment })?.policy).toEqual(JSON.parse(python.stdout).policy);
 		} else {

@@ -162,11 +162,11 @@ def validate_site_policy(value: Any) -> dict[str, Any]:
     }
     if "gpu_partition" in execution:
         partition = _mapping(execution["gpu_partition"], "execution.gpu_partition")
-        _reject_unknown(partition, {"onboard_gpu_uuid"}, "execution.gpu_partition")
-        uuid = _string(partition.get("onboard_gpu_uuid"), "execution.gpu_partition.onboard_gpu_uuid")
-        if re.fullmatch(r"GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", uuid) is None:
-            raise SitePolicyError("execution.gpu_partition.onboard_gpu_uuid must be a full lowercase GPU UUID")
-        policy["execution"]["gpu_partition"] = {"onboard_gpu_uuid": uuid}
+        _reject_unknown(partition, {"onboard_gpu_uuids"}, "execution.gpu_partition")
+        uuids = _unique_strings(partition.get("onboard_gpu_uuids"), "execution.gpu_partition.onboard_gpu_uuids", absolute=False)
+        if any(re.fullmatch(r"GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", uuid) is None for uuid in uuids):
+            raise SitePolicyError("execution.gpu_partition UUIDs must be full lowercase GPU UUIDs")
+        policy["execution"]["gpu_partition"] = {"onboard_gpu_uuids": uuids}
     if "projection_root" in datasets:
         policy["datasets"]["projection_root"] = _absolute_path(
             datasets["projection_root"], "datasets.projection_root"

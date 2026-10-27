@@ -134,7 +134,7 @@ The draft must use backend=`uv`, point to an executable validation Python, and n
 
 ### Device Policy
 
-When the active site policy contains `execution.gpu_partition.onboard_gpu_uuid`, local onboard GPU execution is restricted to that full UUID; infer, trans, approve, agent evaluation and metric evaluation exclude it. Model code uses process-local `cuda:0` after visibility is applied. A missing/excluded UUID fails the GPU launch instead of selecting another card. Explicit CPU execution hides GPUs.
+When the active site policy contains `execution.gpu_partition.onboard_gpu_uuids`, local onboard GPU execution is restricted to the nonempty list of full UUIDs; infer, trans, approve, agent evaluation and metric evaluation exclude all of them. A one-item list reserves one GPU; multiple items expose an onboard GPU pool, without automatic model parallelism or task scheduling. Model code uses process-local ordinals after visibility is applied; a single-GPU model can keep `cuda:0`. A missing/excluded UUID fails the GPU launch instead of selecting another card. Explicit CPU execution hides GPUs.
 
 The standard probe and validation gates apply this policy automatically. For ad-hoc model import/load evidence in `build_env` or `validate_env_compat`, and GPU container validation in `package_container`, launch through the Harness Python helper (argv after `--`, no shell string):
 
