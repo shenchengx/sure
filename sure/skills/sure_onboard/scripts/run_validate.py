@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sure_infer" / "scr
 from deployment_contract import declared_server_protocol
 from model_child_env import model_child_env
 from sure.site.gpu_partition import partition_command, partition_environment
+from sure.runtime.onboard_gpu import wrap_onboard_command
 from server_protocol import JSONL_SERVER_PROTOCOL
 from sure.runtime.evaluation.task_registry import normalize_task
 from sure.runtime.model_server.tool_contract import tool_contracts
@@ -347,6 +348,9 @@ def run_validation_command(
     timeout_raw = data.get("timeout_seconds")
     timeout = float(timeout_raw) if isinstance(timeout_raw, (int, float)) and timeout_raw > 0 else 1800.0
     command, child_env = partition_command(command, env_for(data, validation_device), "onboard", device=validation_device or "auto")
+    pooled_command = wrap_onboard_command(command, child_env, timeout=timeout, log_path=log_path.with_suffix(".gpu-lease.jsonl"))
+    pooled = pooled_command is not command
+    command = pooled_command
     started = time.time()
     try:
         proc = subprocess.run(
@@ -356,7 +360,7 @@ def run_validation_command(
             capture_output=True,
             text=True,
             shell=shell,
-            timeout=timeout,
+            timeout=None if pooled else timeout,
         )
     except subprocess.TimeoutExpired as exc:
         elapsed = time.time() - started
