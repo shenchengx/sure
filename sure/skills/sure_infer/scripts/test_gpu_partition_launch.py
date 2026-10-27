@@ -58,6 +58,25 @@ class LaunchTests(unittest.TestCase):
         self.assertEqual(env["CUDA_VISIBLE_DEVICES"], GPUS[3])
         self.assertEqual(env["DEVICE"], "cuda:0")
 
+    def test_container_uses_selected_host_policy_outside_checkout(self):
+        fixture = container_fixtures.DeploymentBindingTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        binding = container_fixtures.load_deployment_binding(fixture.model, "demo")
+        policy_path = fixture.root / "selected-site.yaml"
+        policy_path.write_text("schema: sure.site.policy.v1\n")
+        with patch.object(container_execution, "load_site_policy", return_value={"path": str(policy_path)}):
+            command, _ = container_execution.build_local_container_command(
+                surface={"env": {"SURE_SITE_POLICY": "/model/forged.yaml"}},
+                eval_input={"model": {"deployment_binding": binding}, "runtime": {
+                    "run_dir": str(fixture.output), "harness_runtime": fixture._runtime_binding()}, "datasets": []},
+                control_run_dir=fixture.control, entrypoint=fixture.entrypoint, repo_root=fixture.repo,
+                device_request="cpu")
+        target = container_execution.container_path(policy_path.resolve())
+        self.assertIn(f"type=bind,src={policy_path.resolve()},dst={target},readonly", command)
+        self.assertIn(f"SURE_SITE_POLICY={target}", command)
+        self.assertNotIn("SURE_SITE_POLICY=/model/forged.yaml", command)
+
     def test_worker_auto_capacity_excludes_onboard(self):
         self.policy()
         self.assertEqual(resolve_eval_input._local_gpu_count(), 7)

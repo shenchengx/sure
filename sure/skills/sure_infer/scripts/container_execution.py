@@ -11,6 +11,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from sure.site.gpu_partition import partition_command
+from sure.site.loader import load_site_policy
 
 from harness_runtime import harness_runtime_from_eval_input
 from deployment_binding import DEPLOYMENT_BINDING_V1, DEPLOYMENT_BINDING_V2
@@ -323,6 +324,14 @@ def build_local_container_command(
         value = _replace_prefix(value, model_source, model_target)
         env[key] = value
     env.update(extra_env or {})
+    # Use the host's selected policy, including an explicit policy outside the
+    # checkout. Container defaults must not silently choose a different site.
+    site = load_site_policy(repo_root)
+    if site is not None:
+        policy_path = Path(site["path"]).resolve()
+        policy_target = container_path(policy_path)
+        _mount(command, mounted_targets, policy_path, policy_target, read_only=True)
+        env["SURE_SITE_POLICY"] = policy_target
     if workers > 1:
         # Docker device ids describe host GPUs; CUDA ordinals inside the
         # restricted container are renumbered. Probe those in the entrypoint.
