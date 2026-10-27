@@ -112,8 +112,13 @@ class PartitionTests(unittest.TestCase):
         env = partition_environment({}, "infer", workers=4)
         self.assertEqual(env["CUDA_VISIBLE_DEVICES"].split(","), GPUS[:4])
         self.assertEqual(len(read_context(partition_environment({}, "infer", workers=7))["devices"]), 7)
-        with self.assertRaisesRegex(GpuPartitionError, "capacity"):
+        with self.assertRaisesRegex(GpuPartitionError, "one of 1, 2, 4, or 7"):
             partition_environment({}, "infer", workers=8)
+
+    def test_workers_use_only_supported_partition_sizes(self):
+        for workers in [3, 5, 6, 8]:
+            with self.subTest(workers=workers), self.assertRaisesRegex(GpuPartitionError, "one of 1, 2, 4, or 7"):
+                partition_environment({}, "infer", workers=workers)
 
     def test_model_environment_cannot_select_or_forge_devices(self):
         fake = partition_environment({}, "onboard")
