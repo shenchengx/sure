@@ -78,8 +78,35 @@ is rejected and must be migrated to the list. All configured UUIDs must exist on
 the node; inherited visibility may further narrow each stage's allocation.
 Launchers restrict Docker and Python environments to the stage's GPU UUIDs. Each
 infer Worker still uses process-local `cuda:0`. Onboard sees its permitted pool;
-reserving multiple GPUs does not add model parallelism or distribute concurrent
-onboard tasks automatically. Run contexts record the pool in `onboard_uuids`.
+reserving multiple GPUs does not add model parallelism. Onboard GPU commands
+now acquire one exclusive card from the pool: two free cards can run two commands
+concurrently, and further commands wait until a card is released. Run contexts
+record the pool in `onboard_uuids` and the selected card in `devices` plus
+`onboard_lease`. Model code continues to use `cuda:0`.
+
+The allocator covers each GPU execution segment (environment probe, validation,
+server smoke or `run_gpu_command.py`), releasing the card between segments.
+Nested helpers inherit the existing lease. It is a node-local, same-Unix-user
+allocator shared across checkouts and policy files, using persistent lock files
+under `/tmp/sure-onboard-gpu-<uid>/`. Other Unix accounts and programs that bypass
+the controlled launchers do not participate. Waiting polls all eligible cards;
+strict FIFO ordering is not guaranteed. No free-memory heuristic is used.
+
+Waiting is cancellable and does not consume the model command's execution
+timeout; an enclosing gate or user cancellation can still stop the operation.
+The supervisor stops workload process groups and removes its own Docker
+container before releasing a card. A killed caller is detected and cleaned up.
+If the supervisor itself is killed with SIGKILL, or cleanup cannot be confirmed,
+an owner receipt prevents reuse of that card. Check the recorded processes and
+container before removing that specific `.owner.json` receipt; never delete the
+`.lock` file. This prevents an uncertain cleanup from silently causing overlap.
+
+Validation runs append `waiting`, `acquired`, `timeout`/`cancelled` and `released`
+events to `artifacts/<kind>_execution.gpu-lease.jsonl` (or beside a custom log).
+`run_gpu_command.py --lease-log <path>` can persist the same events; they also
+appear on stderr. Acquisition events record the final UUID and actual command.
+The command execution timeout begins after acquisition; logged total validation
+duration includes waiting.
 
 The smoke pass runs first, on one GPU, under `parallel_inference/smoke/`, so a broken
 model server is caught before the full dataset is started.

@@ -20,6 +20,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "runtime" / "harness"))
 from model_child_env import model_child_env
 from sure.site.gpu_partition import partition_environment
+from sure.runtime.onboard_gpu import wrap_onboard_command
 from sure.runtime.model.bootstrap import ModelRuntimeError, manifest_sha256, verify_runtime
 from sure.runtime.uvenv import runtime_python_relative
 from sure.site.loader import SitePolicyError, load_site_policy
@@ -272,14 +273,16 @@ sys.exit(0 if ok else 31)
     env = model_child_env()
     env["PYTHONPATH"] = str(cwd)
     env = partition_environment(env, "onboard", device=device)
+    command = [str(python_executable), "-c", script, json.dumps(imports), "1" if require_cuda else "0"]
+    pooled_command = wrap_onboard_command(command, env, timeout=90)
     try:
         proc = subprocess.run(
-            [str(python_executable), "-c", script, json.dumps(imports), "1" if require_cuda else "0"],
+            pooled_command,
             cwd=str(cwd),
             env=env,
             capture_output=True,
             text=True,
-            timeout=90,
+            timeout=90 if pooled_command is command else None,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import queue
 import subprocess
 import sys
@@ -51,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from deployment_contract import sha256_file
 from model_child_env import model_child_env
 from sure.runtime.gpu_partition import enforce_gpu_context
+from sure.runtime.onboard_gpu import wrap_onboard_command
 from sure.runtime.evaluation.task_registry import allows_empty_prediction
 from sure.runtime.prediction_payload import extract_mcp_payload, normalize_prediction_payload
 
@@ -332,6 +334,12 @@ def main() -> int:
     parser.add_argument("--produces", required=True)
     parser.add_argument("--server-stderr-log")
     args = parser.parse_args()
+    # Acquire before starting the MCP deadline; nested smoke retains its
+    # caller's existing lease and never waits for a second card.
+    invocation = [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]]
+    pooled = wrap_onboard_command(invocation, os.environ)
+    if pooled is not invocation:
+        return subprocess.call(pooled)
 
     produces = Path(args.produces)
     steps: dict = {}
