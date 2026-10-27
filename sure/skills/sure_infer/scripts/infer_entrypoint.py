@@ -227,9 +227,9 @@ def stage_guards() -> Ctx:
     try:
         num_workers = int(_env("SURE_INFER_NUM_WORKERS", "1"))
     except ValueError as exc:
-        raise StageError("guards", "num_workers must be an integer between 1 and 8") from exc
-    if not 1 <= num_workers <= 8:
-        raise StageError("guards", "num_workers must be an integer between 1 and 8")
+        raise StageError("guards", "num_workers must be one of 1, 2, 4, or 7") from exc
+    if num_workers not in {1, 2, 4, 7}:
+        raise StageError("guards", "num_workers must be one of 1, 2, 4, or 7")
     require_nonempty_predictions = _env("SURE_EVAL_REQUIRE_NONEMPTY_PREDICTIONS") == "1"
 
     child_env = dict(os.environ)

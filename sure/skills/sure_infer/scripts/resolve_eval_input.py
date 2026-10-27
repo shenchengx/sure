@@ -57,6 +57,7 @@ TEXT_DEFAULT_METRICS = {
     "SLU": "accuracy",
     "SPEECH_UNDERSTANDING": "accuracy",
 }
+VALID_WORKER_COUNTS = (1, 2, 4, 7)
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._=-]{0,199}$")
 
 # Approved models and promoted results both live below the configured trust
@@ -507,8 +508,8 @@ def _parallel_request(args: Any, workers: int | None = None) -> int:
         workers = getattr(args, "num_workers", None)
         if workers is None:
             workers = 1  # Validate explicit input before resolving datasets.
-    if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 8:
-        raise EvalInputError("num_workers must be an integer between 1 and 8")
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers not in VALID_WORKER_COUNTS:
+        raise EvalInputError("num_workers must be one of 1, 2, 4, or 7")
     device = str(args.device or "auto").strip().lower()
     if workers > 1 and device not in {"auto", "cuda"}:
         raise EvalInputError("num_workers > 1 requires device=auto or device=cuda")
@@ -568,7 +569,7 @@ def _auto_workers(selected: int, available: int) -> int:
         planned = 4
     else:
         planned = 8
-    return max(1, min(planned, available))
+    return max((count for count in VALID_WORKER_COUNTS if count <= min(planned, available)), default=1)
 
 
 def _plan_workers(
@@ -1007,7 +1008,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--num-workers",
         type=int,
-        help="Override automatic per-dataset Worker selection; range: 1-8",
+        help="Override automatic per-dataset Worker selection; allowed values: 1, 2, 4, 7",
     )
     parser.add_argument("--execution", choices=("auto", "local"))
     parser.add_argument(

@@ -17,6 +17,8 @@ def partition_environment(
     env: Mapping[str, str], stage: str, *, device: str = "auto", workers: int = 1,
 ) -> dict[str, str]:
     device = device.lower()
+    if workers not in {1, 2, 4, 7}:
+        raise GpuPartitionError("GPU_PARTITION: workers must be one of 1, 2, 4, or 7")
     inherited = read_context(os.environ)
     if inherited is not None:
         if stage != inherited["stage"]:

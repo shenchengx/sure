@@ -156,7 +156,7 @@ class ParallelTests(unittest.TestCase):
             max_samples=0, no_resume=True, device="cuda", metrics="", smoke_samples=None,
             require_nonempty_predictions=False, child_env=env,
             tool_name="transcribe_audio", datasets_root=self.datasets_root, datasets=["demo__v1"],
-            num_workers=3, gpu_devices=["2", "4", "6"],
+            num_workers=2, gpu_devices=["2", "4"],
         )
 
     def calls(self) -> list[dict]:
@@ -166,22 +166,22 @@ class ParallelTests(unittest.TestCase):
     def test_mixed_automatic_workers_use_separate_processes_and_preserve_order(self) -> None:
         counts = {"small__v1": 5, "large__v1": 4000}
         self.ctx.datasets = list(counts)
-        self.ctx.num_workers = 8
-        self.ctx.gpu_devices = [str(index) for index in range(8)]
+        self.ctx.num_workers = 7
+        self.ctx.gpu_devices = [str(index) for index in range(7)]
         self.ctx.worker_selection = "auto"
         for dataset, count in counts.items():
             samples = [{**self.samples[0], "key": f"k{index}"} for index in range(count)]
             path = self.datasets_root / "sure_benchmark" / "jsonl" / f"{dataset}.jsonl"
             path.write_text("".join(json.dumps(sample) + "\n" for sample in samples))
-            self.ctx.worker_plans[dataset] = {"worker_selection": "auto", "planned_workers": 1 if count == 5 else 8,
+            self.ctx.worker_plans[dataset] = {"worker_selection": "auto", "planned_workers": 1 if count == 5 else 7,
                                               "total_samples": count, "selected_samples": count}
         infer_entrypoint.stage_generate(self.ctx)
         calls = self.calls()
-        self.assertEqual([call["dataset"] for call in calls], ["small__v1"] + ["large__v1"] * 8)
+        self.assertEqual([call["dataset"] for call in calls], ["small__v1"] + ["large__v1"] * 7)
         small_report = parallel.read_json(self.product / "parallel_inference/small__v1/merge_report.json")
         large_report = parallel.read_json(self.product / "parallel_inference/large__v1/merge_report.json")
         self.assertEqual(small_report["requested_workers"], 1)
-        self.assertEqual(large_report["requested_workers"], 8)
+        self.assertEqual(large_report["requested_workers"], 7)
         self.assertEqual(min(call["time"] for call in calls[1:]) > calls[0]["time"] + 0.15, True)
         for dataset, count in counts.items():
             rows = parallel.read_json(self.product / "parallel_inference" / dataset / "plan.json")
@@ -191,20 +191,20 @@ class ParallelTests(unittest.TestCase):
             self.assertEqual([line.split("\t")[0] for line in lines], [f"k{index}" for index in range(count)])
         self.ctx.no_resume = False
         infer_entrypoint.stage_generate(self.ctx)
-        self.assertEqual(len(self.calls()), 9)
+        self.assertEqual(len(self.calls()), 8)
         summary = run_infer._parallel_summary(self.product, 8)
         self.assertEqual(summary["worker_selection"], "auto")
-        self.assertEqual([row["planned_workers"] for row in summary["datasets"]], [1, 8])
+        self.assertEqual([row["planned_workers"] for row in summary["datasets"]], [1, 7])
 
     def test_dataset_count_drift_fails_before_starting_workers(self) -> None:
-        self.ctx.worker_plans["demo__v1"] = {"worker_selection": "explicit", "planned_workers": 3,
+        self.ctx.worker_plans["demo__v1"] = {"worker_selection": "explicit", "planned_workers": 2,
                                            "total_samples": 11, "selected_samples": 11}
         with self.assertRaisesRegex(ValueError, "changed after planning"):
             parallel.run_dataset(self.ctx, "demo__v1")
         self.assertEqual(self.calls(), [])
 
     def test_even_split_and_small_or_empty_dataset(self) -> None:
-        for count, workers, lengths in ((10, 3, [4, 3, 3]), (2, 4, [1, 1]), (0, 4, [])):
+        for count, workers, lengths in ((10, 2, [5, 5]), (2, 4, [1, 1]), (0, 4, [])):
             with self.subTest(count=count):
                 shards = parallel.split_keys([str(i) for i in range(count)], workers)
                 self.assertEqual([len(shard) for shard in shards], lengths)
@@ -214,7 +214,7 @@ class ParallelTests(unittest.TestCase):
         report = parallel.run_dataset(self.ctx, "demo__v1")
         self.assertEqual(report["status"], "completed")
         calls = self.calls()
-        self.assertEqual(sorted(row["gpu"] for row in calls), ["2", "4", "6"])
+        self.assertEqual(sorted(row["gpu"] for row in calls), ["2", "4"])
         # Every Worker logged its start before the first one could finish, so
         # none of them was queued behind a peer. Process spawn is slow enough on
         # a loaded host that the fixed window this used to use was a coin flip.
@@ -223,31 +223,31 @@ class ParallelTests(unittest.TestCase):
         self.assertEqual(text, "".join(f"k{i}\tk{i}\n" for i in range(10)))
         status = parallel.read_json(self.product / "prediction_generation_status.json")
         self.assertEqual(status["datasets"][0]["num_generated_samples"], 10)
-        summary = run_infer._parallel_summary(self.product, 3)
-        self.assertEqual(summary["gpu_devices"], ["2", "4", "6"])
+        summary = run_infer._parallel_summary(self.product, 2)
+        self.assertEqual(summary["gpu_devices"], ["2", "4"])
 
     def test_one_worker_retry_does_not_repeat_successes(self) -> None:
         self.ctx.child_env["FAIL_MODE"] = "once"
         report = parallel.run_dataset(self.ctx, "demo__v1")
         self.assertEqual(report["status"], "completed")
-        self.assertEqual(len(self.calls()), 4)
+        self.assertEqual(len(self.calls()), 3)
         retry = self.calls()[-1]
-        self.assertEqual(retry["keys"], ["k3"])
+        self.assertEqual(retry["keys"], ["k4"])
         self.assertEqual(retry["gpu"], "2")
 
     def test_failure_preserves_successes_and_resume_only_loads_missing_keys(self) -> None:
         self.ctx.child_env["FAIL_MODE"] = "always"
         report = parallel.run_dataset(self.ctx, "demo__v1")
         self.assertEqual(report["status"], "failed")
-        self.assertEqual(report["generated"], 6)
+        self.assertEqual(report["generated"], 5)
         self.assertFalse((self.product / "predictions" / "manifest.json").exists())
-        self.assertEqual(len(self.calls()), 5)
+        self.assertEqual(len(self.calls()), 4)
         self.ctx.no_resume = False
         self.ctx.child_env.pop("FAIL_MODE")
         report = parallel.run_dataset(self.ctx, "demo__v1")
-        self.assertEqual(report["reused"], 6)
+        self.assertEqual(report["reused"], 5)
         self.assertEqual(report["status"], "completed")
-        self.assertEqual(set(sum([call["keys"] for call in self.calls()[5:]], [])), {"k0", "k1", "k2", "k3"})
+        self.assertEqual(set(sum([call["keys"] for call in self.calls()[4:]], [])), {"k0", "k1", "k2", "k3", "k4"})
         before = len(self.calls())
         report = parallel.run_dataset(self.ctx, "demo__v1")
         self.assertEqual(report["effective_workers"], 0)
@@ -395,7 +395,7 @@ class ParallelTests(unittest.TestCase):
         self.ctx.child_env.pop("FAIL_MODE")
         self.ctx.no_resume = False
         report = parallel.run_dataset(self.ctx, "demo__v1")
-        self.assertEqual(report["reused"], 6)
+        self.assertEqual(report["reused"], 5)
         self.assertEqual(report["generated"], 10)
 
     def test_shared_interruption_cleans_started_workers(self) -> None:
@@ -450,13 +450,13 @@ class ParallelTests(unittest.TestCase):
 
     def test_report_and_gate_use_the_recorded_task_projection(self) -> None:
         self.ctx.worker_selection = "auto"
-        self.ctx.worker_plans["demo__v1"] = {"worker_selection": "auto", "planned_workers": 3,
+        self.ctx.worker_plans["demo__v1"] = {"worker_selection": "auto", "planned_workers": 2,
                                            "total_samples": 10, "selected_samples": 10}
         parallel.run_dataset(self.ctx, "demo__v1")
         (self.product / "validation_payload.json").write_text(json.dumps({"is_valid": True,
             "results": [{"dataset": "demo__v1", "is_valid": True, "expected_samples": 10, "provided_predictions": 10}]}))
         canonical = "demo_pool__v1"
-        details = [{"name": canonical, "jsonl_path": "/data/demo__v1.jsonl", "planned_workers": 3,
+        details = [{"name": canonical, "jsonl_path": "/data/demo__v1.jsonl", "planned_workers": 2,
                     "num_samples": 10, "selected_samples": 10}]
         rows = run_infer._dataset_rows(self.product, [canonical], run_infer.projection_stems(details))
         self.assertEqual(rows, [{"dataset": canonical, "expected": 10, "generated": 10, "valid": 10}])
@@ -468,10 +468,10 @@ class ParallelTests(unittest.TestCase):
                    "deployment_binding": check_execution_result.compliance.expected_binding_summary(binding)}
         (artifacts / "execution_surface.json").write_text(json.dumps(surface))
         (artifacts / "eval_input_resolved.json").write_text(json.dumps({"model": {"deployment_binding": binding},
-                "datasets": details, "runtime": {"num_workers": 3, "worker_selection": "auto"}}))
+                "datasets": details, "runtime": {"num_workers": 2, "worker_selection": "auto"}}))
         result = {"job_status": "succeeded", "exit_code": 0, "execution_path": "local_python",
                   "product_dir": str(self.product), "datasets": rows,
-                  "parallelism": run_infer._parallel_summary(self.product, 3)}
+                  "parallelism": run_infer._parallel_summary(self.product, 2)}
         result_path = artifacts / "execution_result.json"
         result_path.write_text(json.dumps(result))
         (self.product / "protocol.yaml").write_text("schema: test\n")
@@ -479,7 +479,7 @@ class ParallelTests(unittest.TestCase):
         references.mkdir(parents=True)
         (references / "demo__v1.jsonl").write_text("{}\n")
         self.assertEqual(check_execution_result.gate_errors(artifacts.parent, result_path), [])
-        for key, value in (("planned_workers", 8), ("total_samples", 11), ("selected_samples", 9), ("effective_workers", 4)):
+        for key, value in (("planned_workers", 7), ("total_samples", 11), ("selected_samples", 9), ("effective_workers", 4)):
             with self.subTest(key=key):
                 old = result["parallelism"]["datasets"][0][key]
                 result["parallelism"]["datasets"][0][key] = value
