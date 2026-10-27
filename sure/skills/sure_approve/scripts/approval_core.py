@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 
@@ -32,12 +32,12 @@ sys.path.append(str(ONBOARD_SCRIPTS))
 from deployment_binding import DeploymentBindingError, load_deployment_binding
 from deployment_contract import declared_server_protocol
 from model_child_env import model_child_env
-from sure.site.gpu_partition import partition_command, partition_environment
 from model_wrapper_mcp_server import _tool_names
 from server_protocol import MCP_SERVER_PROTOCOL
 from sure.runtime import bundle_content
 from sure.runtime.model_server.launch import resolve_python_server_command
 from sure.runtime.model_server.tool_contract import ToolContractError, tool_contracts
+from sure.site.gpu_partition import partition_command
 from sure.site.loader import SitePolicyError, load_site_policy
 
 try:
@@ -789,7 +789,7 @@ def _advertised_contract(candidate: Path, command: list[str], tool_name: str, in
                 "--timeout", f"{timeout:.0f}",
                 "--produces", str(produces),
             ],
-            capture_output=True, text=True, timeout=timeout + 60.0, check=False, env=partition_environment(model_child_env(), "approve"),
+            capture_output=True, text=True, timeout=timeout + 60.0, check=False, env=model_child_env(),
         )
         evidence = read_json(produces) if produces.is_file() else {}
     if completed.returncode != 0:
@@ -926,7 +926,7 @@ def verify_runtime(run_dir: Path) -> dict[str, Any]:
         # on every run, so smoking the sealed candidate in place would dirty the tree the
         # digest check below protects. Run the smoke on a throwaway mirror instead. The
         # mirror lives beside the candidate so its hard links can land on one filesystem.
-        child_env = partition_environment(model_child_env(os.environ), "approve")
+        child_env = model_child_env(os.environ)
         with tempfile.TemporaryDirectory(prefix="sure-approve-smoke-", dir=candidate.parent) as smoke_root:
             smoke_candidate = Path(smoke_root) / candidate.name
             _mirror_candidate_for_smoke(candidate, smoke_candidate)
@@ -959,20 +959,38 @@ def verify_runtime(run_dir: Path) -> dict[str, Any]:
             raise ApprovalError(f"candidate image pull verification failed: {pull.stderr[-2000:]}")
         container = binding["container"]
         model_target = str(container["model_mount"]["target"])
-        command = [
-            "docker",
-            "run",
-            "--rm",
-            "--mount",
-            f"type=bind,src={candidate},dst={model_target},readonly",
-            "--workdir",
-            str(container["working_dir"]),
-        ]
-        if container.get("gpu_required") is True:
-            command.extend(["--gpus", "all"])
-        command.extend([image_ref, str(container["python_executable"]), f"{model_target}/validate.py"])
-        command, child_env = partition_command(command, os.environ, "approve", device="auto" if container.get("gpu_required") is True else "cpu")
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=1800, check=False, env=child_env)
+        # Mount targets name locations inside the image, so they are POSIX on
+        # every host; a trailing slash in the binding must not leave a second
+        # one in the nested target.
+        artifacts_target = str(PurePosixPath(model_target) / "artifacts")
+        with tempfile.TemporaryDirectory(prefix="sure-approve-validation-") as validation_root:
+            validation_output = Path(validation_root)
+            # The model mount is read-only, and validate.py persists its stage
+            # artifacts inside the bundle. Overlay a writable copy of what the
+            # bundle already ships: the sealed tree keeps one digest, and the
+            # container still sees artifact_manifest.json and the fixtures.
+            if not (candidate / "artifacts").is_dir():
+                raise ApprovalError(f"candidate has no artifacts/ directory: {candidate / 'artifacts'}")
+            shutil.copytree(candidate / "artifacts", validation_output, dirs_exist_ok=True)
+            # The image may run as a non-root USER while the temporary directory
+            # belongs to the approving account, created 0700.
+            os.chmod(validation_output, 0o777)
+            command = [
+                "docker",
+                "run",
+                "--rm",
+                "--mount",
+                f"type=bind,src={candidate},dst={model_target},readonly",
+                "--mount",
+                f"type=bind,src={validation_output},dst={artifacts_target}",
+                "--workdir",
+                str(container["working_dir"]),
+            ]
+            if container.get("gpu_required") is True:
+                command.extend(["--gpus", "all"])
+            command.extend([image_ref, str(container["python_executable"]), f"{model_target}/validate.py"])
+            command, child_env = partition_command(command, os.environ, "approve", device="auto" if container.get("gpu_required") is True else "cpu")
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=1800, check=False, env=child_env)
         smoke = {"command": command, "pull_stdout_sha256": sha256_bytes(pull.stdout.encode()), "exit_code": completed.returncode, "stdout_sha256": sha256_bytes(completed.stdout.encode()), "stderr": completed.stderr[-2000:]}
     if completed.returncode != 0:
         raise ApprovalError(f"candidate runtime verification failed: {smoke['stderr']}")
