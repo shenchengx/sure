@@ -16,12 +16,13 @@ argument and predictions are identical to a single-server run.
 | fewer than 1000 | 1 |
 | 1000 – 1999 | 2 |
 | 2000 – 3999 | 4 |
-| 4000 or more | 8 |
+| 4000 or more | 7 |
 
-The planned count is then capped at the GPUs this node provides. The cap is the
+Supported requested counts are **1, 2, 4, and 7**. The planned count is rounded down
+to the largest supported count that fits the GPUs available to inference. The cap is the
 allocation a local run actually gets: `CUDA_VISIBLE_DEVICES` when it is set,
 otherwise the `nvidia-smi` device list. A 4000-sample dataset on a two-GPU node plans
-two Workers, not eight, so automatic selection never asks for hardware the node does
+two Workers, not seven, so automatic selection never asks for hardware the node does
 not have. With no usable GPU the plan stays at one Worker and the run proceeds on the
 existing single-server path.
 
@@ -29,7 +30,7 @@ An explicit `num_workers` is honoured up to the node's GPU count. Above it, inpu
 resolution fails before any model is loaded:
 
 ```text
-num_workers=8 asks for 8 GPUs but this node provides 2
+num_workers=7 asks for 7 GPUs but this node provides 2
 ```
 
 `num_workers=1` always uses the single-server path. More than one Worker requires
@@ -57,6 +58,12 @@ Both local surfaces work:
   Python before loading anything and derives the container ordinals.
 - **`local_python`** — the host allocation is already the truth, so the node's
   `CUDA_VISIBLE_DEVICES` reaches the entrypoint unchanged.
+
+When `execution.gpu_partition.onboard_gpu_uuid` is configured, that physical GPU
+is reserved for onboard and excluded from inference before worker planning. The
+launchers restrict Docker and Python environments to the remaining GPU UUIDs;
+each worker still uses process-local `cuda:0`. A policy-restricted Docker launch
+forwards UUID visibility rather than unrestricted host ordinals.
 
 The smoke pass runs first, on one GPU, under `parallel_inference/smoke/`, so a broken
 model server is caught before the full dataset is started.

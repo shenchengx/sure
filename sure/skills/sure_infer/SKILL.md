@@ -22,7 +22,7 @@ Control principle: **agent decides scope, scripts execute.** You (the agent) con
 | `protocol` | — | `standard_system` (default) follows the approved model's upstream configuration. `strict_core` requires every conservative parameter to be mapped to an MCP argument or explicitly proven not applicable. |
 | `device` | — | `auto \| cpu \| cuda \| cuda:<index>`. Default `auto`; resolved by `scripts/resolve_eval_input.py` and handed to `scripts/infer_entrypoint.py` by `scripts/run_infer.py`. `cuda:<index>` selects the local host GPU by setting `CUDA_VISIBLE_DEVICES=<index>`; because the process then sees one GPU, model code receives `DEVICE=cuda:0`. The original request and the process-visible device are recorded separately. |
 | `max_samples` | — | Sample cap for bounded validation runs. Omitted or `0` means full dataset. |
-| `num_workers` | — | Optional integer `1`–`8` overriding automatic per-dataset selection. When omitted, select 1/2/4/8 Workers for fewer than 1000/2000/4000/otherwise samples in the task projection, after applying `max_samples`, then cap the result at the number of GPUs this node provides (`CUDA_VISIBLE_DEVICES` when set, otherwise `nvidia-smi`), so automatic selection never asks for hardware the node lacks. An explicit value above that count is rejected at input resolution. Allocate the maximum across all datasets before execution, then process datasets sequentially with their own Worker counts. Multiple Workers require `device=auto` or `cuda`; no silent fallback. Model calls remain single-sample. |
+| `num_workers` | — | Optional integer `1`, `2`, `4`, or `7` overriding automatic per-dataset selection. When omitted, select 1/2/4/7 Workers for fewer than 1000/2000/4000/otherwise samples in the task projection, after applying `max_samples`, then cap the result at the number of GPUs this node provides (`CUDA_VISIBLE_DEVICES` when set, otherwise `nvidia-smi`), so automatic selection never asks for hardware the node lacks. An explicit value above that count is rejected at input resolution. Allocate the maximum across all datasets before execution, then process datasets sequentially with their own Worker counts. Multiple Workers require `device=auto` or `cuda`; no silent fallback. Model calls remain single-sample. |
 | `execution` | — | `auto \| local`. Both resolve to `local_docker` or approved `local_python`; a remote cluster surface is not available here. |
 | `execution_path` | — | Legacy alias: `auto \| local_docker \| local_python`. `local_bash` is normalized to the approved local runtime; arbitrary host inference is forbidden. |
 | `metrics` | — | Comma-separated metrics the later `/sure_eval` run should report, e.g. `metrics=cer`. Recorded in the resolved input; inference itself does not evaluate. |
@@ -224,10 +224,12 @@ the prediction snapshots every 25 completed samples.
 ## Optional multi-GPU inference
 
 Omitting `num_workers` selects Workers per dataset from the projected sample count,
-limited by `max_samples`: 1–999 → 1, 1000–1999 → 2, 2000–3999 → 4, ≥4000 → 8,
-then capped at the GPUs this node provides. The cap is the allocation a local run
+limited by `max_samples`: 1–999 → 1, 1000–1999 → 2, 2000–3999 → 4, ≥4000 → 7,
+then rounded down to the largest of 1, 2, 4, or 7 that fits the available GPUs.
+Explicit `num_workers` also accepts only 1, 2, 4, or 7. The cap is the allocation a local run
 will actually get: `CUDA_VISIBLE_DEVICES` when it is set, otherwise the `nvidia-smi`
-device list. A 4000-sample dataset on a two-GPU node plans two Workers, not eight,
+device list, excluding the onboard UUID when GPU partitioning is configured.
+A 4000-sample dataset on a two-GPU node plans two Workers, not seven,
 so automatic selection never asks for hardware the node lacks. An explicit
 `num_workers` above that count is rejected during input resolution, before any
 model is loaded. Explicit `num_workers=1` uses the existing single-server path for
