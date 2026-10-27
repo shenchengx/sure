@@ -844,6 +844,11 @@ def verify_server_contract(candidate: Path, runtime_kind: str, binding: dict[str
     fallback = not command
     if fallback and runtime_kind != "python":
         raise ApprovalError("container candidates must declare server.command; Python fallback MCP is unavailable in the image")
+    if fallback:
+        # The same boundary the onboard gate draws: a model that declares no
+        # server has no tool contract of its own to check. The harness fallback
+        # wrapper serves MCP, and its schema is not this config's business.
+        evidence["advertised"] = "config.yaml omits server.command: the harness fallback wrapper serves MCP"
     try:
         protocol = declared_server_protocol(config, candidate)
     except ValueError as exc:
